@@ -5,9 +5,11 @@
   const noteInput = document.getElementById('note-input');
   const btnSendNote = document.getElementById('btn-send-note');
   const btnHost = document.getElementById('btn-host');
+  const btnDir = document.getElementById('btn-dir');
   const hostnameDisplay = document.getElementById('hostname-display');
   let currentHostname = 'localhost';
   const dirDisplay = document.getElementById('dir-display');
+  let currentDir = '.';
   const sessionTitle = document.getElementById('session-title');
   const connectionStatus = document.getElementById('connection-status');
   const tlsWarningBadge = document.getElementById('tls-warning-badge');
@@ -301,6 +303,31 @@
     gist: { id: 'gist', label: 'Gist' },
   };
 
+  // Sliding tab indicator helper
+  function updateTabIndicator(btn, instant = false) {
+    const indicator = document.querySelector('.nav-tab-indicator');
+    if (!indicator || !btn) return;
+
+    const navTabs = btn.closest('.nav-tabs');
+    if (navTabs) navTabs.classList.add('ready');
+
+    if (instant) {
+      indicator.style.transition = 'none';
+    }
+
+    const offsetLeft = btn.offsetLeft;
+    const width = btn.offsetWidth;
+
+    indicator.style.transform = `translateX(${offsetLeft}px)`;
+    indicator.style.width = `${width}px`;
+    indicator.style.opacity = '1';
+
+    if (instant) {
+      void indicator.offsetHeight;
+      indicator.style.transition = '';
+    }
+  }
+
   function applyTabOrder(tabOrder) {
     if (!Array.isArray(tabOrder)) return;
     const navTabs = document.querySelector('.nav-tabs');
@@ -312,6 +339,11 @@
         navTabs.appendChild(btn);
       }
     });
+
+    const activeBtn = navTabs.querySelector('.nav-tab.active');
+    if (activeBtn) {
+      updateTabIndicator(activeBtn, true);
+    }
   }
 
   // Settings Modal functions
@@ -622,16 +654,22 @@
       { name: 'gist', btn: tabBtnGist, panel: panelGist },
     ];
 
+    let activeBtn = null;
     tabs.forEach((t) => {
       const active = t.name === tabName;
       if (t.btn) {
         t.btn.classList.toggle('active', active);
         t.btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        if (active) activeBtn = t.btn;
       }
       if (t.panel) {
         t.panel.classList.toggle('active', active);
       }
     });
+
+    if (activeBtn) {
+      updateTabIndicator(activeBtn);
+    }
 
     if (tabName === 'files') {
       if (allFiles.length === 0) {
@@ -1257,7 +1295,14 @@
         btnHost.title = `Host Machine: ${currentHostname} (click to copy)`;
         btnHost.setAttribute('aria-label', `Host: ${currentHostname}`);
       }
-      dirDisplay.textContent = data.dir || '.';
+      currentDir = data.dir || '.';
+      if (dirDisplay) {
+        dirDisplay.textContent = currentDir;
+      }
+      if (btnDir) {
+        btnDir.title = `Destination Directory: ${currentDir} (click to copy)`;
+        btnDir.setAttribute('aria-label', `Directory: ${currentDir}`);
+      }
       isOnceMode = !!data.once;
       currentMobileUrl = data.mobile_url || window.location.href;
       qrUrlDisplay.textContent = currentMobileUrl;
@@ -1516,6 +1561,34 @@
         }
       });
     }
+
+    if (btnDir) {
+      btnDir.addEventListener('click', async () => {
+        const dir = currentDir || '.';
+        const res = await copyTextToClipboard(dir);
+        if (res.ok) {
+          showToast(`Copied directory "${dir}" to clipboard`, 'success');
+        } else {
+          showToast(`Directory: ${dir}`, 'info');
+        }
+      });
+    }
+
+    // Responsive and font-ready tab indicator positioning
+    window.addEventListener('resize', () => {
+      const activeBtn = document.querySelector('.nav-tab.active');
+      if (activeBtn) updateTabIndicator(activeBtn, true);
+    });
+
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => {
+        const activeBtn = document.querySelector('.nav-tab.active');
+        if (activeBtn) updateTabIndicator(activeBtn, true);
+      });
+    }
+
+    const initialActiveTab = document.querySelector('.nav-tab.active') || tabBtnDropzone;
+    updateTabIndicator(initialActiveTab, true);
 
     // Check for query parameter ?k=... for magic link / QR code instant login
     const params = new URLSearchParams(window.location.search);

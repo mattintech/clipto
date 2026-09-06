@@ -137,6 +137,18 @@ body {
   color: #fff;
 }
 
+.header-icon-btn.dir-badge {
+  background: rgba(234, 179, 8, 0.08);
+  border-color: rgba(234, 179, 8, 0.25);
+  color: #eab308;
+}
+
+.header-icon-btn.dir-badge:hover {
+  background: rgba(234, 179, 8, 0.22);
+  border-color: #eab308;
+  color: #fff;
+}
+
 .header-icon-btn.host-badge {
   background: rgba(56, 189, 248, 0.08);
   border-color: rgba(56, 189, 248, 0.25);
@@ -1082,6 +1094,7 @@ body {
 
 /* Nav Tabs Segmented Control */
 .nav-tabs {
+  position: relative;
   display: inline-flex;
   gap: 4px;
   background: rgba(30, 41, 59, 0.7);
@@ -1093,7 +1106,24 @@ body {
   margin-bottom: 2px;
 }
 
+.nav-tab-indicator {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: 0;
+  background: var(--primary);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
+  transition: transform 0.25s cubic-bezier(0.2, 0, 0, 1), width 0.25s cubic-bezier(0.2, 0, 0, 1), opacity 0.15s ease;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+}
+
 .nav-tab {
+  position: relative;
+  z-index: 2;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1105,18 +1135,24 @@ body {
   font-size: 0.88rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color 0.2s ease, background 0.15s ease;
   user-select: none;
 }
 
 .nav-tab:hover {
   color: var(--text-main);
+}
+
+.nav-tab:not(.active):hover {
   background: rgba(255, 255, 255, 0.05);
 }
 
 .nav-tab.active {
-  background: var(--primary);
   color: #ffffff;
+}
+
+.nav-tabs:not(.ready) .nav-tab.active {
+  background: var(--primary);
   box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
 }
 
