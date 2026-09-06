@@ -30,6 +30,10 @@
   const filesFilterStatus = document.getElementById('files-filter-status');
   const btnRefreshFiles = document.getElementById('btn-refresh-files');
   const filesListBody = document.getElementById('files-list-body');
+  const btnFilesViewList = document.getElementById('btn-files-view-list');
+  const btnFilesViewGrid = document.getElementById('btn-files-view-grid');
+  const filesTableWrapper = document.getElementById('files-table-wrapper');
+  const filesGridWrapper = document.getElementById('files-grid-wrapper');
 
   // Dedicated Gist Panel elements
   const gistFileSelect = document.getElementById('gist-file-select');
@@ -68,6 +72,22 @@
   const helpTabBtns = helpModal.querySelectorAll('.help-tab-btn');
   const helpTabPanels = helpModal.querySelectorAll('.help-tab-panel');
 
+  // Settings Modal elements
+  const btnSettings = document.getElementById('btn-settings');
+  const settingsModal = document.getElementById('settings-modal');
+  const settingsModalClose = document.getElementById('settings-modal-close');
+  const settingsModalBackdrop = settingsModal ? settingsModal.querySelector('.modal-backdrop') : null;
+  const settingsConfigPath = document.getElementById('settings-config-path');
+  const settingsTabList = document.getElementById('settings-tab-list');
+  const settingsDefaultTab = document.getElementById('settings-default-tab');
+  const settingsUploadsView = document.getElementById('settings-uploads-view');
+  const settingsFilesView = document.getElementById('settings-files-view');
+  const btnSettingsToggleJson = document.getElementById('btn-settings-toggle-json');
+  const settingsJsonEditor = document.getElementById('settings-json-editor');
+  const btnSettingsReset = document.getElementById('btn-settings-reset');
+  const btnSettingsCancel = document.getElementById('btn-settings-cancel');
+  const btnSettingsSave = document.getElementById('btn-settings-save');
+
   // Clipboard Info Modal elements
   const clipboardModal = document.getElementById('clipboard-modal');
   const clipboardModalClose = document.getElementById('clipboard-modal-close');
@@ -95,6 +115,15 @@
   let currentRawGistText = '';
   let currentGistFilename = '';
   let currentViewMode = localStorage.getItem('clipto_view_mode') || 'grid';
+  let currentFilesViewMode = localStorage.getItem('clipto_files_view_mode') || 'list';
+  let appConfig = {
+    tab_order: ['dropzone', 'files', 'gist'],
+    default_tab: 'first',
+    view_mode: 'grid',
+    files_view_mode: 'list',
+    config_path: '~/.clipto/config.json',
+  };
+  let currentSettingsTabOrder = ['dropzone', 'files', 'gist'];
 
   // Sound chime via Web Audio API (zero external assets)
   function playSuccessChime() {
@@ -263,9 +292,209 @@
   if (clipboardModalBackdrop) clipboardModalBackdrop.addEventListener('click', closeClipboardModal);
   if (clipboardModalOkBtn) clipboardModalOkBtn.addEventListener('click', closeClipboardModal);
 
+  // Tab Definitions & Ordering
+  const TAB_DEFINITIONS = {
+    dropzone: { id: 'dropzone', label: 'Upload & Paste' },
+    files: { id: 'files', label: 'Files' },
+    gist: { id: 'gist', label: 'Gist' },
+  };
+
+  function applyTabOrder(tabOrder) {
+    if (!Array.isArray(tabOrder)) return;
+    const navTabs = document.querySelector('.nav-tabs');
+    if (!navTabs) return;
+
+    tabOrder.forEach((tabId) => {
+      const btn = document.getElementById(`tab-btn-${tabId}`);
+      if (btn) {
+        navTabs.appendChild(btn);
+      }
+    });
+  }
+
+  // Settings Modal functions
+  function renderSettingsTabList() {
+    if (!settingsTabList) return;
+    settingsTabList.innerHTML = '';
+
+    currentSettingsTabOrder.forEach((tabId, index) => {
+      const info = TAB_DEFINITIONS[tabId] || { id: tabId, label: tabId };
+      const item = document.createElement('div');
+      item.className = 'settings-tab-item';
+
+      item.innerHTML = `
+        <div class="settings-tab-item-left">
+          <span class="badge" style="font-size: 11px;">#${index + 1}</span>
+          <span>${info.label}</span>
+        </div>
+        <div class="settings-tab-item-actions">
+          <button type="button" class="btn-move" data-dir="up" data-idx="${index}" ${index === 0 ? 'disabled' : ''} title="Move Up">↑</button>
+          <button type="button" class="btn-move" data-dir="down" data-idx="${index}" ${index === currentSettingsTabOrder.length - 1 ? 'disabled' : ''} title="Move Down">↓</button>
+        </div>
+      `;
+
+      item.querySelector('[data-dir="up"]').addEventListener('click', () => {
+        if (index > 0) {
+          const temp = currentSettingsTabOrder[index];
+          currentSettingsTabOrder[index] = currentSettingsTabOrder[index - 1];
+          currentSettingsTabOrder[index - 1] = temp;
+          renderSettingsTabList();
+          syncSettingsJson();
+        }
+      });
+
+      item.querySelector('[data-dir="down"]').addEventListener('click', () => {
+        if (index < currentSettingsTabOrder.length - 1) {
+          const temp = currentSettingsTabOrder[index];
+          currentSettingsTabOrder[index] = currentSettingsTabOrder[index + 1];
+          currentSettingsTabOrder[index + 1] = temp;
+          renderSettingsTabList();
+          syncSettingsJson();
+        }
+      });
+
+      settingsTabList.appendChild(item);
+    });
+  }
+
+  function syncSettingsJson() {
+    if (settingsJsonEditor) {
+      const obj = {
+        tab_order: currentSettingsTabOrder,
+        default_tab: settingsDefaultTab ? settingsDefaultTab.value : 'first',
+        view_mode: settingsUploadsView ? settingsUploadsView.value : 'grid',
+        files_view_mode: settingsFilesView ? settingsFilesView.value : 'list',
+      };
+      settingsJsonEditor.value = JSON.stringify(obj, null, 2);
+    }
+  }
+
+  function openSettingsModal() {
+    if (!settingsModal) return;
+    if (settingsConfigPath) {
+      settingsConfigPath.textContent = appConfig.config_path || '~/.clipto/config.json';
+    }
+
+    currentSettingsTabOrder = [...(appConfig.tab_order || ['dropzone', 'files', 'gist'])];
+    renderSettingsTabList();
+
+    if (settingsDefaultTab) {
+      settingsDefaultTab.value = appConfig.default_tab || 'first';
+    }
+    if (settingsUploadsView) {
+      settingsUploadsView.value = currentViewMode || 'grid';
+    }
+    if (settingsFilesView) {
+      settingsFilesView.value = currentFilesViewMode || 'list';
+    }
+    syncSettingsJson();
+
+    settingsModal.classList.add('active');
+  }
+
+  function closeSettingsModal() {
+    if (settingsModal) settingsModal.classList.remove('active');
+  }
+
+  if (btnSettings) btnSettings.addEventListener('click', openSettingsModal);
+  if (settingsModalClose) settingsModalClose.addEventListener('click', closeSettingsModal);
+  if (settingsModalBackdrop) settingsModalBackdrop.addEventListener('click', closeSettingsModal);
+  if (btnSettingsCancel) btnSettingsCancel.addEventListener('click', closeSettingsModal);
+
+  if (settingsDefaultTab) settingsDefaultTab.addEventListener('change', syncSettingsJson);
+  if (settingsUploadsView) settingsUploadsView.addEventListener('change', syncSettingsJson);
+  if (settingsFilesView) settingsFilesView.addEventListener('change', syncSettingsJson);
+
+  if (btnSettingsToggleJson && settingsJsonEditor) {
+    btnSettingsToggleJson.addEventListener('click', () => {
+      settingsJsonEditor.classList.toggle('hidden');
+      btnSettingsToggleJson.textContent = settingsJsonEditor.classList.contains('hidden') ? 'Edit JSON' : 'Hide JSON';
+    });
+  }
+
+  if (btnSettingsReset) {
+    btnSettingsReset.addEventListener('click', () => {
+      currentSettingsTabOrder = ['dropzone', 'files', 'gist'];
+      if (settingsDefaultTab) settingsDefaultTab.value = 'first';
+      if (settingsUploadsView) settingsUploadsView.value = 'grid';
+      if (settingsFilesView) settingsFilesView.value = 'list';
+      renderSettingsTabList();
+      syncSettingsJson();
+    });
+  }
+
+  if (btnSettingsSave) {
+    btnSettingsSave.addEventListener('click', async () => {
+      let payload = {
+        tab_order: currentSettingsTabOrder,
+        default_tab: settingsDefaultTab ? settingsDefaultTab.value : 'first',
+        view_mode: settingsUploadsView ? settingsUploadsView.value : 'grid',
+        files_view_mode: settingsFilesView ? settingsFilesView.value : 'list',
+      };
+
+      if (settingsJsonEditor && !settingsJsonEditor.classList.contains('hidden')) {
+        try {
+          const parsed = JSON.parse(settingsJsonEditor.value);
+          if (parsed && typeof parsed === 'object') {
+            payload = { ...payload, ...parsed };
+          }
+        } catch (err) {
+          showToast('Invalid JSON: ' + err.message, 'error');
+          return;
+        }
+      }
+
+      try {
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Failed to save configuration');
+        }
+        const data = await res.json();
+        if (data.config) {
+          appConfig = { ...appConfig, ...data.config };
+        }
+        applyTabOrder(appConfig.tab_order);
+        if (appConfig.view_mode) setViewMode(appConfig.view_mode);
+        if (appConfig.files_view_mode) setFilesViewMode(appConfig.files_view_mode);
+        closeSettingsModal();
+        showToast('Settings saved to ~/.clipto/config.json');
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+  }
+
+  // Files Browser List vs Grid View Mode
+  function setFilesViewMode(mode) {
+    currentFilesViewMode = mode;
+    localStorage.setItem('clipto_files_view_mode', mode);
+    if (btnFilesViewList && btnFilesViewGrid) {
+      btnFilesViewList.classList.toggle('active', mode === 'list');
+      btnFilesViewGrid.classList.toggle('active', mode === 'grid');
+    }
+    if (filesTableWrapper && filesGridWrapper) {
+      filesTableWrapper.classList.toggle('hidden', mode === 'grid');
+      filesGridWrapper.classList.toggle('hidden', mode !== 'grid');
+    }
+    renderFiles();
+  }
+
+  if (btnFilesViewList) {
+    btnFilesViewList.addEventListener('click', () => setFilesViewMode('list'));
+  }
+  if (btnFilesViewGrid) {
+    btnFilesViewGrid.addEventListener('click', () => setFilesViewMode('grid'));
+  }
+
   // Global Escape key handler
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+      if (settingsModal && settingsModal.classList.contains('active')) closeSettingsModal();
       if (clipboardModal && clipboardModal.classList.contains('active')) closeClipboardModal();
       if (helpModal && helpModal.classList.contains('active')) closeHelpModal();
       if (qrModal && qrModal.classList.contains('active')) closeQrModal();
@@ -492,7 +721,7 @@
     }
   }
 
-  // Render directory files table
+  // Render directory files (table or grid)
   function renderFiles() {
     const query = fileSearchInput.value.trim().toLowerCase();
     const filtered = allFiles.filter((f) => {
@@ -508,75 +737,174 @@
     }
 
     if (filtered.length === 0) {
-      filesListBody.innerHTML = `<tr><td colspan="4" class="empty-state">${query ? 'No matching files found.' : 'No files in this directory.'}</td></tr>`;
+      const emptyMsg = query ? 'No matching files found.' : 'No files in this directory.';
+      if (filesListBody) {
+        filesListBody.innerHTML = `<tr><td colspan="4" class="empty-state">${emptyMsg}</td></tr>`;
+      }
+      if (filesGridWrapper) {
+        filesGridWrapper.innerHTML = `<div class="empty-state">${emptyMsg}</div>`;
+      }
       return;
     }
 
-    filesListBody.innerHTML = '';
-    filtered.forEach((file) => {
-      const tr = document.createElement('tr');
+    if (currentFilesViewMode === 'grid' && filesGridWrapper) {
+      filesGridWrapper.innerHTML = '';
+      filtered.forEach((file) => {
+        const card = document.createElement('div');
+        card.className = 'grid-card';
 
-      let actionsHtml = '';
-      if (file.is_gist) {
+        let mediaHtml = '';
+        if (file.is_image) {
+          mediaHtml = `
+            <div class="grid-card-media" title="Click to enlarge image">
+              <img src="${file.raw_url}" alt="${file.name}" loading="lazy">
+            </div>
+          `;
+        } else if (file.is_text || file.is_gist) {
+          mediaHtml = `
+            <div class="grid-card-media" title="Click to preview/edit code" style="cursor: pointer;">
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+            </div>
+          `;
+        } else {
+          mediaHtml = `
+            <div class="grid-card-media">
+              ${getFileIconSvg(file)}
+            </div>
+          `;
+        }
+
+        const gistBadge = file.is_gist ? '<span class="badge" style="font-size: 10px;">Gist</span>' : '';
+
+        card.innerHTML = `
+          ${mediaHtml}
+          <div class="grid-card-body">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px;">
+              <span class="grid-card-name" title="${file.name}">${file.name}</span>
+              ${gistBadge}
+            </div>
+            <div class="grid-card-meta">
+              <span>${formatSize(file.size)}</span>
+              <span>${file.time || '-'}</span>
+            </div>
+            <div class="file-actions" style="margin-top: 6px; justify-content: flex-start; gap: 4px;">
+              ${(file.is_gist || file.is_text) ? `<button class="btn-action btn-gist" data-action="gist" title="View / Edit"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg><span>Code</span></button>` : ''}
+              <a href="${file.raw_url}" download="${file.name}" class="btn-action" title="Download">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                <span>DL</span>
+              </a>
+              <button class="btn-action" data-action="curl" title="Copy CLI curl command">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+                <span>curl</span>
+              </button>
+            </div>
+          </div>
+        `;
+
+        if (file.is_image) {
+          card.querySelector('.grid-card-media').addEventListener('click', () => {
+            openLightbox(file.raw_url, file.name);
+          });
+        } else if (file.is_text || file.is_gist) {
+          card.querySelector('.grid-card-media').addEventListener('click', () => {
+            openGist(file.name, true);
+          });
+        }
+
+        const btnGist = card.querySelector('[data-action="gist"]');
+        if (btnGist) {
+          btnGist.addEventListener('click', () => openGist(file.name, true));
+        }
+
+        const btnCurl = card.querySelector('[data-action="curl"]');
+        if (btnCurl) {
+          btnCurl.addEventListener('click', () => copyCurlForFile(file.raw_url, file.name));
+        }
+
+        filesGridWrapper.appendChild(card);
+      });
+      return;
+    }
+
+    if (filesListBody) {
+      filesListBody.innerHTML = '';
+      filtered.forEach((file) => {
+        const tr = document.createElement('tr');
+
+        let actionsHtml = '';
+        if (file.is_gist || file.is_text) {
+          actionsHtml += `
+            <button class="btn-action btn-gist" data-action="gist" title="View in Gist viewer">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+              <span>${file.is_gist ? 'View Gist' : 'Code'}</span>
+            </button>
+          `;
+        }
         actionsHtml += `
-          <button class="btn-action btn-gist" data-action="gist" title="View Gist">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
-            <span>View Gist</span>
+          <a href="${file.raw_url}" download="${file.name}" class="btn-action" title="Download raw file">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            <span>Download</span>
+          </a>
+          <button class="btn-action" data-action="curl" title="Copy CLI curl command">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+            <span>curl</span>
           </button>
         `;
-      }
-      actionsHtml += `
-        <a href="${file.raw_url}" download="${file.name}" class="btn-action" title="Download raw file">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-          <span>Download</span>
-        </a>
-        <button class="btn-action" data-action="curl" title="Copy CLI curl command">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
-          <span>curl</span>
-        </button>
-      `;
 
-      const gistTag = file.is_gist ? '<span class="badge" style="margin-left: 6px; font-size: 11px;">Gist</span>' : '';
+        const gistTag = file.is_gist ? '<span class="badge" style="margin-left: 6px; font-size: 11px;">Gist</span>' : '';
 
-      tr.innerHTML = `
-        <td>
-          <div class="file-cell">
-            ${getFileIconSvg(file)}
-            <a href="javascript:void(0)" class="file-name-link">${file.name}</a>
-            ${gistTag}
-          </div>
-        </td>
-        <td class="td-size">${formatSize(file.size)}</td>
-        <td class="td-time">${file.time || '-'}</td>
-        <td>
-          <div class="file-actions">
-            ${actionsHtml}
-          </div>
-        </td>
-      `;
+        let iconOrThumb = '';
+        if (file.is_image) {
+          iconOrThumb = `<img class="file-thumb-preview" src="${file.raw_url}" alt="${file.name}" title="Click to enlarge" loading="lazy">`;
+        } else {
+          iconOrThumb = getFileIconSvg(file);
+        }
 
-      const nameLink = tr.querySelector('.file-name-link');
-      if (file.is_gist) {
-        nameLink.addEventListener('click', () => openGist(file.name, true));
-      } else if (file.is_image) {
-        nameLink.addEventListener('click', () => openLightbox(file.raw_url, file.name));
-      } else {
-        nameLink.href = file.raw_url;
-        nameLink.setAttribute('download', file.name);
-      }
+        tr.innerHTML = `
+          <td>
+            <div class="file-cell">
+              ${iconOrThumb}
+              <a href="javascript:void(0)" class="file-name-link">${file.name}</a>
+              ${gistTag}
+            </div>
+          </td>
+          <td class="td-size">${formatSize(file.size)}</td>
+          <td class="td-time">${file.time || '-'}</td>
+          <td>
+            <div class="file-actions">
+              ${actionsHtml}
+            </div>
+          </td>
+        `;
 
-      const btnGist = tr.querySelector('[data-action="gist"]');
-      if (btnGist) {
-        btnGist.addEventListener('click', () => openGist(file.name, true));
-      }
+        const thumbImg = tr.querySelector('.file-thumb-preview');
+        if (thumbImg) {
+          thumbImg.addEventListener('click', () => openLightbox(file.raw_url, file.name));
+        }
 
-      const btnCurl = tr.querySelector('[data-action="curl"]');
-      if (btnCurl) {
-        btnCurl.addEventListener('click', () => copyCurlForFile(file.raw_url, file.name));
-      }
+        const nameLink = tr.querySelector('.file-name-link');
+        if (file.is_gist || file.is_text) {
+          nameLink.addEventListener('click', () => openGist(file.name, true));
+        } else if (file.is_image) {
+          nameLink.addEventListener('click', () => openLightbox(file.raw_url, file.name));
+        } else {
+          nameLink.href = file.raw_url;
+          nameLink.setAttribute('download', file.name);
+        }
 
-      filesListBody.appendChild(tr);
-    });
+        const btnGist = tr.querySelector('[data-action="gist"]');
+        if (btnGist) {
+          btnGist.addEventListener('click', () => openGist(file.name, true));
+        }
+
+        const btnCurl = tr.querySelector('[data-action="curl"]');
+        if (btnCurl) {
+          btnCurl.addEventListener('click', () => copyCurlForFile(file.raw_url, file.name));
+        }
+
+        filesListBody.appendChild(tr);
+      });
+    }
   }
 
   // Copy curl helper
@@ -903,6 +1231,17 @@
         connectionStatus.querySelector('.status-text').textContent = 'One-Shot';
       }
 
+      if (data.config) {
+        appConfig = { ...appConfig, ...data.config };
+        applyTabOrder(appConfig.tab_order);
+        if (appConfig.view_mode && !localStorage.getItem('clipto_view_mode')) {
+          setViewMode(appConfig.view_mode);
+        }
+        if (appConfig.files_view_mode && !localStorage.getItem('clipto_files_view_mode')) {
+          setFilesViewMode(appConfig.files_view_mode);
+        }
+      }
+
       if (data.share_file) {
         if (!window.location.hash.startsWith('#gist=') && window.location.hash !== '#dropzone') {
           openGist(data.share_file);
@@ -911,6 +1250,11 @@
         if (window.location.hash !== '#dropzone') {
           switchTab('files');
         }
+      } else if (!window.location.hash) {
+        const defaultTab = (appConfig.default_tab && appConfig.default_tab !== 'first')
+          ? appConfig.default_tab
+          : (appConfig.tab_order && appConfig.tab_order[0] ? appConfig.tab_order[0] : 'dropzone');
+        switchTab(defaultTab, false);
       }
       await loadFiles();
     } catch (err) {
@@ -1105,6 +1449,7 @@
   // Initialization & Auto-Auth Check
   async function init() {
     setViewMode(currentViewMode);
+    setFilesViewMode(currentFilesViewMode);
 
     if (!isSecure && tlsWarningBadge) {
       tlsWarningBadge.classList.remove('hidden');

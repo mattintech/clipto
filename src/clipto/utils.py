@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import socket
@@ -246,4 +247,68 @@ def ensure_self_signed_cert() -> tuple:
             return cert_path, key_path
         except Exception as ex:
             raise RuntimeError(f"Failed to generate self-signed certificate: {ex}")
+
+
+DEFAULT_CONFIG = {
+    "tab_order": ["dropzone", "files", "gist"],
+    "default_tab": "first",
+    "view_mode": "grid",
+    "files_view_mode": "list",
+}
+
+
+def get_config_file() -> Path:
+    config_dir = Path.home() / ".clipto"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir / "config.json"
+
+
+def load_global_config() -> dict:
+    """Load global configuration from ~/.clipto/config.json with default fallback."""
+    cfg = dict(DEFAULT_CONFIG)
+    config_file = get_config_file()
+    if config_file.is_file():
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                user_cfg = json.load(f)
+                if isinstance(user_cfg, dict):
+                    if "tab_order" in user_cfg and isinstance(user_cfg["tab_order"], list):
+                        valid_tabs = [t for t in user_cfg["tab_order"] if t in ("dropzone", "files", "gist")]
+                        for t in DEFAULT_CONFIG["tab_order"]:
+                            if t not in valid_tabs:
+                                valid_tabs.append(t)
+                        user_cfg["tab_order"] = valid_tabs
+                    cfg.update(user_cfg)
+        except Exception:
+            pass
+    cfg["config_path"] = str(config_file)
+    return cfg
+
+
+def save_global_config(new_config: dict) -> dict:
+    """Save updated global configuration to ~/.clipto/config.json."""
+    current = load_global_config()
+    current.pop("config_path", None)
+
+    if isinstance(new_config, dict):
+        for k, v in new_config.items():
+            if k in DEFAULT_CONFIG:
+                if k == "tab_order" and isinstance(v, list):
+                    valid_tabs = [t for t in v if t in ("dropzone", "files", "gist")]
+                    for t in DEFAULT_CONFIG["tab_order"]:
+                        if t not in valid_tabs:
+                            valid_tabs.append(t)
+                    current["tab_order"] = valid_tabs
+                elif k == "default_tab" and v in ("dropzone", "files", "gist", "first"):
+                    current["default_tab"] = v
+                elif k in ("view_mode", "files_view_mode") and v in ("list", "grid"):
+                    current[k] = v
+
+    config_file = get_config_file()
+    with open(config_file, "w", encoding="utf-8") as f:
+        json.dump(current, f, indent=2)
+
+    current["config_path"] = str(config_file)
+    return current
+
 

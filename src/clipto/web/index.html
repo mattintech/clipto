@@ -50,6 +50,10 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
           <span>Help</span>
         </button>
+        <button id="btn-settings" class="badge settings-badge" title="Clipto Global Settings & Configuration">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          <span>Settings</span>
+        </button>
         <div class="badge host-badge" title="Host Machine">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
           <span id="hostname-display">Connecting...</span>
@@ -176,6 +180,14 @@
           </div>
           <div class="files-meta">
             <span id="files-filter-status" class="badge"></span>
+            <div class="view-toggles">
+              <button id="btn-files-view-list" class="view-toggle-btn active" title="Detailed Table View">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+              </button>
+              <button id="btn-files-view-grid" class="view-toggle-btn" title="Thumbnail Grid View">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+              </button>
+            </div>
             <button id="btn-refresh-files" class="btn btn-secondary btn-sm" title="Refresh files list">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="23 4 23 10 17 10"></polyline>
@@ -188,7 +200,7 @@
         </div>
 
         <div class="files-container card">
-          <div class="files-table-wrapper">
+          <div id="files-table-wrapper" class="files-table-wrapper">
             <table class="files-table">
               <thead>
                 <tr>
@@ -203,6 +215,7 @@
               </tbody>
             </table>
           </div>
+          <div id="files-grid-wrapper" class="uploads-list grid-view files-grid hidden"></div>
         </div>
       </div>
 
@@ -431,6 +444,69 @@
         </div>
         <div style="margin-top: 18px; display: flex; justify-content: flex-end; width: 100%;">
           <button id="clipboard-modal-ok-btn" class="btn btn-primary btn-sm">Got it</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content settings-modal-content card">
+        <button id="settings-modal-close" class="modal-close" title="Close (Esc)">✕</button>
+        <div class="help-header">
+          <h3>⚙️ Clipto Configuration</h3>
+          <p class="modal-subtitle">Global settings persisted at <code id="settings-config-path">~/.clipto/config.json</code></p>
+        </div>
+
+        <div class="settings-body">
+          <div class="settings-section">
+            <label class="settings-label">Navigation Tab Order</label>
+            <p class="settings-hint">Configure the sequence of your navigation tabs:</p>
+            <div id="settings-tab-list" class="settings-tab-list"></div>
+          </div>
+
+          <div class="settings-section">
+            <label class="settings-label" for="settings-default-tab">Default Active Tab on Open</label>
+            <select id="settings-default-tab" class="settings-select">
+              <option value="first">First Tab in Order (Recommended)</option>
+              <option value="dropzone">Upload & Paste</option>
+              <option value="files">Files</option>
+              <option value="gist">Gist</option>
+            </select>
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-col">
+              <label class="settings-label" for="settings-uploads-view">Uploads Default View</label>
+              <select id="settings-uploads-view" class="settings-select">
+                <option value="grid">Thumbnail Grid</option>
+                <option value="list">Compact List</option>
+              </select>
+            </div>
+            <div class="settings-col">
+              <label class="settings-label" for="settings-files-view">Files Default View</label>
+              <select id="settings-files-view" class="settings-select">
+                <option value="list">Detailed Table</option>
+                <option value="grid">Thumbnail Grid</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="settings-json-header">
+              <label class="settings-label" for="settings-json-editor">Raw JSON Config</label>
+              <button id="btn-settings-toggle-json" type="button" class="btn btn-secondary btn-sm" style="font-size: 11px; padding: 2px 8px;">Edit JSON</button>
+            </div>
+            <textarea id="settings-json-editor" class="settings-json-editor hidden" rows="7" spellcheck="false"></textarea>
+          </div>
+        </div>
+
+        <div class="settings-footer">
+          <button id="btn-settings-reset" class="btn btn-secondary btn-sm">Reset Defaults</button>
+          <div style="display: flex; gap: 8px;">
+            <button id="btn-settings-cancel" class="btn btn-secondary btn-sm">Cancel</button>
+            <button id="btn-settings-save" class="btn btn-primary btn-sm">Save & Apply</button>
+          </div>
         </div>
       </div>
     </div>

@@ -8,9 +8,17 @@ import time
 import unittest
 import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 
 from clipto.server import CliptoHTTPServer, CliptoRequestHandler
-from clipto.utils import find_available_port, get_unique_path, sanitize_filename
+from clipto.utils import (
+    find_available_port,
+    get_config_file,
+    get_unique_path,
+    load_global_config,
+    sanitize_filename,
+    save_global_config,
+)
 
 
 class TestCliptoUtils(unittest.TestCase):
@@ -42,6 +50,46 @@ class TestCliptoUtils(unittest.TestCase):
         port = find_available_port(0)
         self.assertGreater(port, 0)
 
+    def test_global_config_load_and_save(self):
+        fake_config_file = self.temp_dir / "config.json"
+        with patch("clipto.utils.get_config_file", return_value=fake_config_file):
+            # 1. Defaults when no file exists
+            cfg = load_global_config()
+            self.assertEqual(cfg["tab_order"], ["dropzone", "files", "gist"])
+            self.assertEqual(cfg["default_tab"], "first")
+            self.assertEqual(cfg["view_mode"], "grid")
+            self.assertEqual(cfg["files_view_mode"], "list")
+            self.assertEqual(cfg["config_path"], str(fake_config_file))
+
+            # 2. Save custom config with reordered tabs
+            saved = save_global_config({
+                "tab_order": ["gist", "files"],
+                "default_tab": "gist",
+                "view_mode": "list",
+                "files_view_mode": "grid",
+            })
+            # Missing tab ('dropzone') is automatically appended
+            self.assertEqual(saved["tab_order"], ["gist", "files", "dropzone"])
+            self.assertEqual(saved["default_tab"], "gist")
+            self.assertEqual(saved["view_mode"], "list")
+            self.assertEqual(saved["files_view_mode"], "grid")
+            self.assertTrue(fake_config_file.is_file())
+
+            # 3. Reload config from file
+            reloaded = load_global_config()
+            self.assertEqual(reloaded["tab_order"], ["gist", "files", "dropzone"])
+            self.assertEqual(reloaded["default_tab"], "gist")
+            self.assertEqual(reloaded["view_mode"], "list")
+            self.assertEqual(reloaded["files_view_mode"], "grid")
+
+            # 4. Invalid tab entries filtered out
+            save_global_config({
+                "tab_order": ["unknown_tab", "files", "dropzone"],
+            })
+            reloaded2 = load_global_config()
+            self.assertNotIn("unknown_tab", reloaded2["tab_order"])
+            self.assertIn("gist", reloaded2["tab_order"])
+
 
 class TestCliptoServer(unittest.TestCase):
     def setUp(self):
@@ -69,6 +117,39 @@ class TestCliptoServer(unittest.TestCase):
             data = json.loads(resp.read().decode())
             self.assertEqual(data["title"], "Test Session")
             self.assertEqual(data["dir"], str(self.temp_dir.resolve()))
+            self.assertIn("config", data)
+            self.assertIn("tab_order", data["config"])
+
+    def test_api_config_endpoints(self):
+        fake_config_file = self.temp_dir / "test_api_config.json"
+        with patch("clipto.utils.get_config_file", return_value=fake_config_file):
+            # 1. GET /api/config
+            with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/config") as resp:
+                self.assertEqual(resp.status, 200)
+                data = json.loads(resp.read().decode())
+                self.assertIn("tab_order", data)
+                self.assertIn("default_tab", data)
+                self.assertIn("files_view_mode", data)
+
+            # 2. POST /api/config
+            payload = json.dumps({
+                "tab_order": ["files", "gist", "dropzone"],
+                "default_tab": "files",
+                "files_view_mode": "grid"
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{self.port}/api/config",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req) as resp:
+                self.assertEqual(resp.status, 200)
+                res_data = json.loads(resp.read().decode())
+                self.assertEqual(res_data["status"], "ok")
+                self.assertEqual(res_data["config"]["tab_order"], ["files", "gist", "dropzone"])
+                self.assertEqual(res_data["config"]["default_tab"], "files")
+                self.assertEqual(res_data["config"]["files_view_mode"], "grid")
 
     def test_index_html(self):
         with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/") as resp:
@@ -240,6 +321,64 @@ class TestCliptoServer(unittest.TestCase):
             pin_server.shutdown()
             pin_server.server_close()
             shutil.rmtree(pin_dir, ignore_errors=True)
+
+    def test_api_config_requires_auth(self):
+        auth_dir = Path(tempfile.mkdtemp())
+        auth_port = find_available_port(0)
+        auth_server = CliptoHTTPServer(
+            ("127.0.0.1", auth_port),
+            CliptoRequestHandler,
+            upload_dir=auth_dir,
+            title="Auth Config Session",
+            once=False,
+            auth_token="secure123",
+        )
+        auth_thread = threading.Thread(target=auth_server.serve_forever, daemon=True)
+        auth_thread.start()
+        time.sleep(0.1)
+
+        try:
+            payload = json.dumps({"tab_order": ["gist", "files", "dropzone"]}).encode("utf-8")
+            # Unauthenticated POST /api/config should fail with 401
+            req_unauth = urllib.request.Request(
+                f"http://127.0.0.1:{auth_port}/api/config",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(req_unauth)
+                self.fail("Expected 401 for unauthenticated POST /api/config")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 401)
+
+            # Authenticate
+            auth_req = urllib.request.Request(
+                f"http://127.0.0.1:{auth_port}/api/auth",
+                data=json.dumps({"key": "secure123"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(auth_req) as resp:
+                cookie = resp.headers.get("Set-Cookie")
+
+            # Authenticated POST /api/config with cookie should succeed
+            fake_config_file = auth_dir / "auth_test_config.json"
+            with patch("clipto.utils.get_config_file", return_value=fake_config_file):
+                req_auth = urllib.request.Request(
+                    f"http://127.0.0.1:{auth_port}/api/config",
+                    data=payload,
+                    headers={"Content-Type": "application/json", "Cookie": cookie},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req_auth) as resp:
+                    self.assertEqual(resp.status, 200)
+                    res_data = json.loads(resp.read().decode())
+                    self.assertEqual(res_data["status"], "ok")
+        finally:
+            auth_server.shutdown()
+            auth_server.server_close()
+            shutil.rmtree(auth_dir, ignore_errors=True)
 
     def test_tunnel_helpers(self):
         from clipto.tunnel import is_cloudflared_available, print_tunnel_guide

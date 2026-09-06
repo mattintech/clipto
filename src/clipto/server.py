@@ -21,8 +21,10 @@ from clipto.utils import (
     get_local_ip,
     get_tailscale_ip,
     get_unique_path,
+    load_global_config,
     render_qr_svg,
     sanitize_filename,
+    save_global_config,
 )
 
 
@@ -347,7 +349,10 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 "share_mode": self.server.share_mode,
                 "share_file": self.server.share_file.name if self.server.share_file else None,
                 "is_ssl": self.server.is_ssl,
+                "config": load_global_config(),
             })
+        elif path == "/api/config":
+            self.send_json(200, load_global_config())
         elif path == "/api/qr":
             mobile_url = self.server.get_mobile_url()
             svg = render_qr_svg(mobile_url)
@@ -608,6 +613,22 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                     threading.Timer(0.3, self.server.shutdown_event.set).start()
             except Exception as e:
                 self.send_json(500, {"error": f"Failed to save gist: {e}"})
+            return
+
+        # Configuration update endpoint requires authentication
+        if self.path == "/api/config":
+            if not self.is_authenticated():
+                self.send_json(401, {"error": "Authentication required", "auth_required": True})
+                return
+
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode("utf-8"))
+                updated = save_global_config(data)
+                self.send_json(200, {"status": "ok", "config": updated})
+            except Exception as e:
+                self.send_json(400, {"error": f"Failed to update config: {e}"})
             return
 
         # Upload endpoint requires authentication
