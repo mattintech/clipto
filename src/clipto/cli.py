@@ -10,6 +10,11 @@ from typing import Optional
 
 from clipto import __version__
 from clipto.server import CliptoHTTPServer, CliptoRequestHandler
+from clipto.totp import (
+    calculate_totp,
+    load_totp_secret,
+    run_totp_setup,
+)
 from clipto.tunnel import print_tunnel_guide, start_tunnel, stop_tunnel
 from clipto.utils import (
     find_available_port,
@@ -83,6 +88,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Protect access with a custom password/passphrase.",
     )
     parser.add_argument(
+        "--totp",
+        action="store_true",
+        help="Protect access with a standard 6-digit TOTP Authenticator code (Google/MS/1Password).",
+    )
+    parser.add_argument(
+        "--totp-setup",
+        action="store_true",
+        help="Initialize or configure TOTP Authenticator with a terminal QR code.",
+    )
+    parser.add_argument(
         "--tunnel",
         nargs="?",
         const="auto",
@@ -111,7 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def get_mobile_url(
     port: int,
-    auth_token: Optional[str] = None,
+    auth_key: Optional[str] = None,
     tunnel_url: Optional[str] = None,
 ) -> str:
     """Determine best URL for mobile access (Tunnel > Tailscale > LAN > Localhost)."""
@@ -128,9 +143,9 @@ def get_mobile_url(
             else:
                 base = f"http://localhost:{port}"
 
-    if auth_token:
+    if auth_key:
         sep = "&" if "?" in base else "/?"
-        return f"{base}{sep}k={auth_token}"
+        return f"{base}{sep}k={auth_key}"
     return base
 
 
@@ -141,33 +156,42 @@ def print_banner(
     once: bool = False,
     show_qr: bool = False,
     auth_token: Optional[str] = None,
+    totp_secret: Optional[str] = None,
     tunnel_url: Optional[str] = None,
 ):
-    query_suffix = f"/?k={auth_token}" if auth_token else ""
+    current_key = None
+    if totp_secret:
+        current_key = calculate_totp(totp_secret)
+    elif auth_token:
+        current_key = auth_token
+
+    query_suffix = f"/?k={current_key}" if current_key else ""
     local_url = f"http://localhost:{port}{query_suffix}"
     lan_ip = get_local_ip()
     tailscale_ip = get_tailscale_ip()
 
     lines = [
         f"📎 Clipto v{__version__}" + (" [ONE-SHOT MODE]" if once else ""),
-        f"Saving to: {target_dir.resolve()}",
+        f"Saving to:  {target_dir.resolve()}",
     ]
     if title:
-        lines.append(f"Session:   {title}")
-    if auth_token:
-        lines.append(f"PIN / Key: {auth_token} 🔒")
+        lines.append(f"Session:    {title}")
+    if totp_secret:
+        lines.append(f"Security:   TOTP Active (6-digit authenticator) 🔐")
+    elif auth_token:
+        lines.append(f"PIN / Key:  {auth_token} 🔒")
 
     if tunnel_url:
         t_url = f"{tunnel_url}{query_suffix}"
-        lines.append(f"Tunnel:    {terminal_hyperlink(t_url)} 🌍")
+        lines.append(f"Tunnel:     {terminal_hyperlink(t_url)} 🌍")
 
-    lines.append(f"Local:     {terminal_hyperlink(local_url)}")
+    lines.append(f"Local:      {terminal_hyperlink(local_url)}")
     if lan_ip and lan_ip != "127.0.0.1":
         lan_url = f"http://{lan_ip}:{port}{query_suffix}"
-        lines.append(f"Network:   {terminal_hyperlink(lan_url)}")
+        lines.append(f"Network:    {terminal_hyperlink(lan_url)}")
     if tailscale_ip:
         tail_url = f"http://{tailscale_ip}:{port}{query_suffix}"
-        lines.append(f"Tailscale: {terminal_hyperlink(tail_url)}")
+        lines.append(f"Tailscale:  {terminal_hyperlink(tail_url)}")
 
     max_w = max(visible_width(line) for line in lines)
     border = "─" * (max_w + 4)
@@ -179,7 +203,7 @@ def print_banner(
     print(f"└{border}┘", file=sys.stderr)
 
     if show_qr:
-        mobile_url = get_mobile_url(port, auth_token=auth_token, tunnel_url=tunnel_url)
+        mobile_url = get_mobile_url(port, auth_key=current_key, tunnel_url=tunnel_url)
         qr_ascii = render_qr_terminal(mobile_url)
         print(f"\nScan with your phone to open ({mobile_url}):\n{qr_ascii}\n", file=sys.stderr)
     else:
@@ -192,6 +216,10 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
 
+    if args.totp_setup:
+        run_totp_setup()
+        sys.exit(0)
+
     if args.help_tunnel:
         print_tunnel_guide()
         sys.exit(0)
@@ -199,12 +227,24 @@ def main():
     target_dir = args.dir.resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    # Determine auth token
-    # If tunnel is active and user didn't specify credentials, auto-generate PIN for security
+    # Determine security credentials
+    totp_secret = None
     auth_token = None
-    if args.password:
+
+    if args.totp:
+        totp_secret = load_totp_secret()
+        if not totp_secret:
+            print(
+                "\n⚠️  No TOTP secret key found.\n"
+                "Run setup first to generate a key and QR code for your authenticator app:\n"
+                "    clipto --totp-setup\n",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    elif args.password:
         auth_token = args.password.strip()
     elif args.pin or args.tunnel:
+        # If tunnel is active and user didn't specify credentials, auto-generate PIN
         auth_token = generate_pin()
 
     # Determine port
@@ -239,6 +279,7 @@ def main():
             title=args.title,
             once=args.once,
             auth_token=auth_token,
+            totp_secret=totp_secret,
             tunnel_url=tunnel_url,
         )
     except OSError as e:
@@ -253,12 +294,14 @@ def main():
         once=args.once,
         show_qr=args.qr,
         auth_token=auth_token,
+        totp_secret=totp_secret,
         tunnel_url=tunnel_url,
     )
 
     if args.open:
+        active_key = server.get_current_auth_key()
         target_open = tunnel_url or f"http://localhost:{port}"
-        query_suffix = f"/?k={auth_token}" if auth_token else ""
+        query_suffix = f"/?k={active_key}" if active_key else ""
         webbrowser.open(f"{target_open}{query_suffix}")
 
     # Start server thread

@@ -3,6 +3,7 @@ import hmac
 import http.cookies
 import json
 import mimetypes
+import secrets
 import socket
 import threading
 import time
@@ -11,8 +12,9 @@ from email.parser import BytesParser
 from email.policy import default
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Set
 
+from clipto.totp import calculate_totp, verify_totp
 from clipto.utils import (
     get_local_ip,
     get_tailscale_ip,
@@ -40,6 +42,7 @@ class CliptoHTTPServer(ThreadingHTTPServer):
         title: Optional[str] = None,
         once: bool = False,
         auth_token: Optional[str] = None,
+        totp_secret: Optional[str] = None,
         tunnel_url: Optional[str] = None,
     ):
         super().__init__(server_address, RequestHandlerClass)
@@ -48,11 +51,19 @@ class CliptoHTTPServer(ThreadingHTTPServer):
         self.title = title
         self.once = once
         self.auth_token = auth_token
+        self.totp_secret = totp_secret
         self.tunnel_url = tunnel_url
         self.uploaded_files: List[Path] = []
         self.shutdown_event = threading.Event()
-        self.failed_auth_attempts = collections.defaultdict(list)  # ip -> timestamps
+        self.failed_auth_attempts = collections.defaultdict(list)
+        self.authenticated_sessions: Set[str] = set()
         self.auth_lock = threading.Lock()
+
+    def get_current_auth_key(self) -> Optional[str]:
+        """Return the active auth key (dynamic TOTP code or static PIN)."""
+        if self.totp_secret:
+            return calculate_totp(self.totp_secret)
+        return self.auth_token
 
     def get_mobile_url(self) -> str:
         if self.tunnel_url:
@@ -69,9 +80,10 @@ class CliptoHTTPServer(ThreadingHTTPServer):
                 else:
                     base = f"http://localhost:{port}"
 
-        if self.auth_token:
+        key = self.get_current_auth_key()
+        if key:
             sep = "&" if "?" in base else "/?"
-            return f"{base}{sep}k={self.auth_token}"
+            return f"{base}{sep}k={key}"
         return base
 
 
@@ -83,34 +95,41 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
         pass
 
     def is_authenticated(self) -> bool:
-        if not self.server.auth_token:
+        if not self.server.auth_token and not self.server.totp_secret:
             return True
 
-        # 1. Check Query parameter: ?k=...
-        parsed = urllib.parse.urlparse(self.path)
-        query = urllib.parse.parse_qs(parsed.query)
-        if "k" in query:
-            if hmac.compare_digest(query["k"][0], self.server.auth_token):
-                return True
-
-        # 2. Check Cookie: clipto_auth=...
+        # 1. Check Cookie: clipto_auth
         cookie_header = self.headers.get("Cookie", "")
         cookies = http.cookies.SimpleCookie(cookie_header)
         if "clipto_auth" in cookies:
-            if hmac.compare_digest(cookies["clipto_auth"].value, self.server.auth_token):
+            cookie_val = cookies["clipto_auth"].value
+            with self.server.auth_lock:
+                if cookie_val in self.server.authenticated_sessions:
+                    return True
+            if self.server.auth_token and hmac.compare_digest(cookie_val, self.server.auth_token):
+                return True
+
+        # 2. Check Query parameter: ?k=...
+        parsed = urllib.parse.urlparse(self.path)
+        query = urllib.parse.parse_qs(parsed.query)
+        if "k" in query:
+            k = query["k"][0].strip()
+            if self.server.totp_secret and verify_totp(self.server.totp_secret, k):
+                return True
+            if self.server.auth_token and hmac.compare_digest(k, self.server.auth_token):
                 return True
 
         # 3. Check Authorization header: Bearer <token>
         auth_header = self.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header[7:].strip()
-            if hmac.compare_digest(token, self.server.auth_token):
+            with self.server.auth_lock:
+                if token in self.server.authenticated_sessions:
+                    return True
+            if self.server.totp_secret and verify_totp(self.server.totp_secret, token):
                 return True
-
-        # 4. Check X-Clipto-Key header
-        key_header = self.headers.get("X-Clipto-Key", "")
-        if key_header and hmac.compare_digest(key_header, self.server.auth_token):
-            return True
+            if self.server.auth_token and hmac.compare_digest(token, self.server.auth_token):
+                return True
 
         return False
 
@@ -165,9 +184,11 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
         # Auth status check
         if path == "/api/auth":
             is_authed = self.is_authenticated()
+            auth_type = "totp" if self.server.totp_secret else ("pin" if self.server.auth_token else "none")
             self.send_json(200, {
-                "required": bool(self.server.auth_token),
+                "required": bool(self.server.auth_token or self.server.totp_secret),
                 "authenticated": is_authed,
+                "auth_type": auth_type,
             })
             return
 
@@ -177,6 +198,7 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/info":
+            auth_type = "totp" if self.server.totp_secret else ("pin" if self.server.auth_token else "none")
             self.send_json(200, {
                 "hostname": socket.gethostname(),
                 "dir": str(self.server.upload_dir),
@@ -184,7 +206,8 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 "once": self.server.once,
                 "tunnel_url": self.server.tunnel_url,
                 "mobile_url": self.server.get_mobile_url(),
-                "auth_required": bool(self.server.auth_token),
+                "auth_required": bool(self.server.auth_token or self.server.totp_secret),
+                "auth_type": auth_type,
             })
         elif path == "/api/qr":
             mobile_url = self.server.get_mobile_url()
@@ -243,15 +266,27 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 data = json.loads(body.decode("utf-8"))
                 provided_key = str(data.get("key", "")).strip()
 
-                if not self.server.auth_token or hmac.compare_digest(provided_key, self.server.auth_token):
-                    # Success
-                    cookie_val = f"clipto_auth={self.server.auth_token or ''}; Path=/; SameSite=Strict; HttpOnly"
+                is_valid = False
+                if self.server.totp_secret:
+                    is_valid = verify_totp(self.server.totp_secret, provided_key)
+                elif self.server.auth_token:
+                    is_valid = hmac.compare_digest(provided_key, self.server.auth_token)
+                else:
+                    is_valid = True
+
+                if is_valid:
+                    # Generate session token and store
+                    session_token = secrets.token_hex(20)
+                    with self.server.auth_lock:
+                        self.server.authenticated_sessions.add(session_token)
+
+                    cookie_val = f"clipto_auth={session_token}; Path=/; SameSite=Strict; HttpOnly"
                     self.send_json(200, {"status": "ok", "authenticated": True}, cookie=cookie_val)
                 else:
-                    # Failed attempt
                     with self.server.auth_lock:
                         self.server.failed_auth_attempts[client_ip].append(now)
-                    self.send_json(401, {"error": "Incorrect PIN or password", "authenticated": False})
+                    err_msg = "Invalid 6-digit authenticator code" if self.server.totp_secret else "Incorrect PIN or password"
+                    self.send_json(401, {"error": err_msg, "authenticated": False})
             except Exception as e:
                 self.send_json(400, {"error": f"Invalid request: {e}"})
             return

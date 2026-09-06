@@ -56,8 +56,8 @@
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
-      osc.frequency.exponentialRampToValueAtTime(880.0, ctx.currentTime + 0.12); // A5
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880.0, ctx.currentTime + 0.12);
       gain.gain.setValueAtTime(0.15, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
       osc.connect(gain);
@@ -65,7 +65,7 @@
       osc.start();
       osc.stop(ctx.currentTime + 0.3);
     } catch (e) {
-      // Audio context might be restricted before user interaction
+      // Audio context might be restricted before interaction
     }
   }
 
@@ -274,6 +274,34 @@
   btnViewList.addEventListener('click', () => setViewMode('list'));
   btnViewGrid.addEventListener('click', () => setViewMode('grid'));
 
+  // Configure lock screen text & input mode based on auth type
+  function setLockScreenMode(authType) {
+    const titleEl = lockScreen.querySelector('h2');
+    const subtitleEl = lockScreen.querySelector('.lock-subtitle');
+
+    if (authType === 'totp') {
+      titleEl.textContent = 'Authenticator Code';
+      subtitleEl.textContent = 'Enter the 6-digit code from Google / MS Authenticator, 1Password, or Apple Passwords';
+      authInput.placeholder = '000000';
+      authInput.maxLength = 6;
+      authInput.inputMode = 'numeric';
+      authInput.pattern = '[0-9]*';
+    } else {
+      titleEl.textContent = 'Protected Session';
+      subtitleEl.textContent = 'Enter the PIN or password from your terminal to connect';
+      authInput.placeholder = 'Enter PIN or Password';
+      authInput.removeAttribute('maxLength');
+      authInput.inputMode = 'text';
+    }
+  }
+
+  // Auto-submit when 6 digits are reached in TOTP mode
+  authInput.addEventListener('input', () => {
+    if (authInput.maxLength === 6 && authInput.value.trim().length === 6) {
+      submitAuth(authInput.value.trim());
+    }
+  });
+
   // Auth & Session functions
   async function submitAuth(key) {
     authError.classList.add('hidden');
@@ -291,7 +319,7 @@
         showToast('Connected to session');
         return true;
       } else {
-        showAuthError(data.error || 'Incorrect PIN or password');
+        showAuthError(data.error || 'Authentication failed');
         return false;
       }
     } catch (err) {
@@ -304,7 +332,7 @@
     authError.textContent = msg;
     authError.classList.remove('hidden');
     lockCard.classList.remove('shake');
-    void lockCard.offsetWidth; // Trigger reflow for animation
+    void lockCard.offsetWidth;
     lockCard.classList.add('shake');
     authInput.value = '';
     authInput.focus();
@@ -361,7 +389,7 @@
 
       if (res.status === 401) {
         lockScreen.classList.remove('hidden');
-        showAuthError('Session expired. Please enter PIN/password.');
+        showAuthError('Session expired. Please re-authenticate.');
         return;
       }
 
@@ -530,6 +558,8 @@
       try {
         const authRes = await fetch('/api/auth');
         const authData = await authRes.json();
+        setLockScreenMode(authData.auth_type);
+
         if (authData.required && !authData.authenticated) {
           lockScreen.classList.remove('hidden');
           authInput.focus();

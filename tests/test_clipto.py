@@ -258,3 +258,75 @@ if __name__ == "__main__":
             self.assertIn("Clipto Remote Access", output)
         finally:
             sys.stderr = old_stderr
+
+    def test_totp_rfc6238_and_verification(self):
+        from clipto.totp import (
+            calculate_totp,
+            generate_totp_secret,
+            get_totp_uri,
+            verify_totp,
+        )
+
+        secret = generate_totp_secret()
+        self.assertTrue(len(secret) >= 16)
+
+        # RFC test vector
+        rfc_secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+        code_59 = calculate_totp(rfc_secret, timestamp=59)
+        self.assertEqual(code_59, "287082")
+
+        # Verify matching
+        now = time.time()
+        curr_code = calculate_totp(secret, timestamp=now)
+        self.assertTrue(verify_totp(secret, curr_code, timestamp=now))
+        self.assertFalse(verify_totp(secret, "000000", timestamp=now))
+
+        # Test URI
+        uri = get_totp_uri(secret, issuer="Clipto", account="test@box")
+        self.assertTrue(uri.startswith("otpauth://totp/Clipto:test%40box?"))
+        self.assertIn("secret=", uri)
+
+    def test_server_with_totp(self):
+        from clipto.totp import calculate_totp, generate_totp_secret
+
+        totp_dir = Path(tempfile.mkdtemp())
+        totp_port = find_available_port(0)
+        secret = generate_totp_secret()
+
+        totp_server = CliptoHTTPServer(
+            ("127.0.0.1", totp_port),
+            CliptoRequestHandler,
+            upload_dir=totp_dir,
+            title="TOTP Session",
+            once=False,
+            totp_secret=secret,
+        )
+        totp_thread = threading.Thread(target=totp_server.serve_forever, daemon=True)
+        totp_thread.start()
+        time.sleep(0.1)
+
+        try:
+            # 1. Unauthenticated request to /api/info fails with 401
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{totp_port}/api/info")
+                self.fail("Expected 401")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 401)
+
+            # 2. Authenticate with valid TOTP code
+            code = calculate_totp(secret)
+            auth_req = urllib.request.Request(
+                f"http://127.0.0.1:{totp_port}/api/auth",
+                data=json.dumps({"key": code}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(auth_req) as resp:
+                self.assertEqual(resp.status, 200)
+                cookie = resp.headers.get("Set-Cookie")
+                self.assertIn("clipto_auth=", cookie)
+
+        finally:
+            totp_server.shutdown()
+            totp_server.server_close()
+            shutil.rmtree(totp_dir, ignore_errors=True)

@@ -18,6 +18,7 @@ Ever run an AI agent, Docker container, or SSH session on a remote server, but n
 - **🖼️ Thumbnail Grid & Lightbox:** Visual thumbnail cards with click-to-enlarge full-screen preview.
 - **🚇 Public HTTPS Tunnels (`--tunnel`):** Instant, secure internet access from cellular or remote servers via Cloudflare Quick Tunnels.
 - **📱 Phone QR Code (`--qr`):** Print a high-contrast terminal QR code or click "Phone QR" in the web UI to snap and upload from your phone camera.
+- **🔐 Authenticator App TOTP (`--totp` / `--totp-setup`):** 6-digit rolling codes with Google Authenticator, Microsoft Authenticator, 1Password, or Apple Passwords.
 - **🔒 PIN & Password Protection (`--pin` / `--pass`):** Protect access with an auto-generated 4-digit PIN or custom passphrase (auto-enabled on `--tunnel`).
 - **📖 Built-in Guides (`--help-tunnel`):** Help modal right in the browser and CLI cheat sheets for remote connections.
 - **🎯 Drag & Drop:** Drop multiple files, images, or documents straight onto the window.
@@ -62,6 +63,31 @@ You'll see a clean terminal banner with the local and LAN URLs:
 
 ---
 
+## 🔐 Authenticator (TOTP) Setup & Usage
+
+To use Google Authenticator, Microsoft Authenticator, 1Password, or Apple Passwords:
+
+### Step 1: One-Time Setup
+
+```bash
+clipto --totp-setup
+```
+
+Clipto will generate a secure key in `~/.clipto/totp.key` and print a setup QR code in your terminal. Scan it with your phone's authenticator app to pair!
+
+### Step 2: Running with TOTP Protection
+
+```bash
+clipto --totp
+# or combined with a tunnel:
+clipto --tunnel --totp
+```
+
+* **Zero-Typing For You:** The terminal link and QR code include the active 30-second token (`?k=CODE`), logging you in automatically.
+* **Locked For Outsiders:** Anyone without the link must enter the 6-digit rolling code from the authenticator app.
+
+---
+
 ## 🚇 Remote Access & Public Tunneling
 
 When running on a cloud VM, Docker container, or uploading from your phone on cellular data:
@@ -75,14 +101,14 @@ Clipto launches an encrypted, free public HTTPS tunnel via Cloudflare:
 ```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  📎 Clipto v0.1.2                                                           │
-│  Saving to: /Users/matt/code/my-project                                     │
-│  PIN / Key: 8421 🔒                                                         │
-│  Tunnel:    https://gentle-winds-example.trycloudflare.com/?k=8421 🌍       │
-│  Local:     http://localhost:8765/?k=8421                                   │
+│  Saving to:  /Users/matt/code/my-project                                    │
+│  PIN / Key:  8421 🔒                                                        │
+│  Tunnel:     https://gentle-winds-example.trycloudflare.com/?k=8421 🌍      │
+│  Local:      http://localhost:8765/?k=8421                                  │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-* **Zero-Typing For You:** The tunnel link and QR code already contain your PIN token (`?k=PIN`), logging you in automatically.
+* **Zero-Typing For You:** The tunnel link and QR code already contain your auth token (`?k=PIN`), logging you in automatically.
 * **Locked For Everyone Else:** Anyone discovering your public tunnel URL hits a clean PIN lock screen.
 * **Want to learn more?** Run `clipto --help-tunnel` for a cheat sheet on tunnels and SSH port forwarding.
 
@@ -106,7 +132,7 @@ A QR code is rendered directly in your terminal pointing to your reachable addre
 # Auto-generate a 4-digit PIN:
 clipto --pin
 
-# Or use a custom password:
+# Or use your own password:
 clipto --pass secret123
 ```
 
@@ -128,7 +154,7 @@ The agent gets the exact file path back into its visual/multimodal context!
 ## ⚙️ CLI Reference
 
 ```text
-usage: clipto [-h] [-v] [-p PORT] [--no-hunt] [-d DIR] [-1] [-t TITLE] [-o] [-q] [--pin] [--pass PASSWORD] [--tunnel [TUNNEL]] [--help-tunnel] [--host HOST] [--timeout TIMEOUT]
+usage: clipto [-h] [-v] [-p PORT] [--no-hunt] [-d DIR] [-1] [-t TITLE] [-o] [-q] [--pin] [--pass PASSWORD] [--totp] [--totp-setup] [--tunnel [TUNNEL]] [--help-tunnel] [--host HOST] [--timeout TIMEOUT]
 
 Instant clipboard, screenshot, and file bridge from browser to terminal.
 
@@ -145,6 +171,8 @@ options:
   -q, --qr              Display a terminal QR code for the network/tunnel URL.
   --pin                 Protect access with an auto-generated 4-digit PIN.
   --pass PASSWORD       Protect access with a custom password.
+  --totp                Protect access with a standard 6-digit TOTP Authenticator code.
+  --totp-setup          Initialize or configure TOTP Authenticator with a terminal QR code.
   --tunnel [TUNNEL]     Expose server over an encrypted public HTTPS tunnel.
   --help-tunnel         Show guide on tunneling and remote connections.
   --host HOST           Host to bind to (default: 0.0.0.0).
