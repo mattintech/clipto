@@ -676,19 +676,19 @@
   tabBtnGist.addEventListener('click', () => switchTab('gist', true));
 
   // File type icon helper (Material flat SVG)
-  function getFileIconSvg(file) {
+  function getFileIconSvg(file, width = 18, height = 18) {
     if (file.is_image) {
-      return `<svg class="file-icon image" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>`;
+      return `<svg class="file-icon image" width="${width}" height="${height}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>`;
     }
     const ext = (file.extension || '').toLowerCase();
     const archiveExts = ['zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar'];
     if (archiveExts.includes(ext)) {
-      return `<svg class="file-icon archive" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8"></path><path d="M1 3h22v5H1z"></path><line x1="10" y1="12" x2="14" y2="12"></line></svg>`;
+      return `<svg class="file-icon archive" width="${width}" height="${height}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8"></path><path d="M1 3h22v5H1z"></path><line x1="10" y1="12" x2="14" y2="12"></line></svg>`;
     }
     if (file.is_text) {
-      return `<svg class="file-icon code" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`;
+      return `<svg class="file-icon code" width="${width}" height="${height}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`;
     }
-    return `<svg class="file-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
+    return `<svg class="file-icon" width="${width}" height="${height}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
   }
 
   // Load directory files from backend
@@ -763,16 +763,16 @@
               <img src="${file.raw_url}" alt="${file.name}" loading="lazy">
             </div>
           `;
-        } else if (file.is_text || file.is_gist) {
+        } else if (file.is_gist) {
           mediaHtml = `
-            <div class="grid-card-media" title="Click to preview/edit code" style="cursor: pointer;">
+            <div class="grid-card-media" title="Click to open Gist" style="cursor: pointer;">
               <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
             </div>
           `;
         } else {
           mediaHtml = `
-            <div class="grid-card-media">
-              ${getFileIconSvg(file)}
+            <div class="grid-card-media" title="Click to download ${file.name}">
+              ${getFileIconSvg(file, 34, 34)}
             </div>
           `;
         }
@@ -791,7 +791,7 @@
                 <span>${formatSize(file.size)}</span>
               </div>
               <div class="grid-card-actions">
-                ${(file.is_gist || file.is_text) ? `
+                ${file.is_gist ? `
                   <button class="btn-card-action btn-card-gist" data-action="gist" title="View / Edit in Gist viewer">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
                   </button>
@@ -812,9 +812,17 @@
           if (file.is_image) {
             nameEl.style.cursor = 'pointer';
             nameEl.addEventListener('click', () => openLightbox(file.raw_url, file.name));
-          } else if (file.is_text || file.is_gist) {
+          } else if (file.is_gist) {
             nameEl.style.cursor = 'pointer';
             nameEl.addEventListener('click', () => openGist(file.name, true));
+          } else {
+            nameEl.style.cursor = 'pointer';
+            nameEl.addEventListener('click', () => {
+              const a = document.createElement('a');
+              a.href = file.raw_url;
+              a.download = file.name;
+              a.click();
+            });
           }
         }
 
@@ -822,9 +830,16 @@
           card.querySelector('.grid-card-media').addEventListener('click', () => {
             openLightbox(file.raw_url, file.name);
           });
-        } else if (file.is_text || file.is_gist) {
+        } else if (file.is_gist) {
           card.querySelector('.grid-card-media').addEventListener('click', () => {
             openGist(file.name, true);
+          });
+        } else {
+          card.querySelector('.grid-card-media').addEventListener('click', () => {
+            const a = document.createElement('a');
+            a.href = file.raw_url;
+            a.download = file.name;
+            a.click();
           });
         }
 
@@ -849,11 +864,11 @@
         const tr = document.createElement('tr');
 
         let actionsHtml = '';
-        if (file.is_gist || file.is_text) {
+        if (file.is_gist) {
           actionsHtml += `
             <button class="btn-action btn-gist" data-action="gist" title="View in Gist viewer">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
-              <span>${file.is_gist ? 'View Gist' : 'Code'}</span>
+              <span>View Gist</span>
             </button>
           `;
         }
@@ -900,7 +915,7 @@
         }
 
         const nameLink = tr.querySelector('.file-name-link');
-        if (file.is_gist || file.is_text) {
+        if (file.is_gist) {
           nameLink.addEventListener('click', () => openGist(file.name, true));
         } else if (file.is_image) {
           nameLink.addEventListener('click', () => openLightbox(file.raw_url, file.name));
