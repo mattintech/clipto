@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "clipto"
-version = "0.1.0"
+version = "0.1.1"
 description = "Instant clipboard, screenshot, and file bridge from your browser to your terminal/remote server."
 readme = "README.md"
 license = "MIT"

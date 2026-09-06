@@ -14,6 +14,7 @@ from clipto.utils import (
     get_local_ip,
     get_tailscale_ip,
     terminal_hyperlink,
+    visible_width,
 )
 
 
@@ -98,12 +99,12 @@ def print_banner(
     if tailscale_ip:
         lines.append(f"Tailscale: {terminal_hyperlink(f'http://{tailscale_ip}:{port}')}")
 
-    max_len = max(len(line) for line in lines)
-    border = "─" * (max_len + 4)
+    max_w = max(visible_width(line) for line in lines)
+    border = "─" * (max_w + 4)
 
     print(f"\n┌{border}┐", file=sys.stderr)
     for line in lines:
-        padding = " " * (max_len - len(line))
+        padding = " " * (max_w - visible_width(line))
         print(f"│  {line}{padding}  │", file=sys.stderr)
     print(f"└{border}┘\n", file=sys.stderr)
     print("Press Cmd+V or drag files into the browser tab. Press Ctrl+C to stop.\n", file=sys.stderr)

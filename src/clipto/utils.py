@@ -3,8 +3,32 @@ import re
 import socket
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
+
+ANSI_REGEX = re.compile(r"\033\]8;;.*?\033\\|\033\[[0-9;]*[a-zA-Z]|\033\]8;;\033\\|\033\][^\a\033]*(\a|\033\\)")
+
+
+def strip_ansi(s: str) -> str:
+    """Remove ANSI escape codes and OSC hyperlinks from a string."""
+    return ANSI_REGEX.sub("", s)
+
+
+def visible_width(s: str) -> int:
+    """
+    Calculate visual display column width in a terminal.
+    Excludes invisible ANSI/OSC escape sequences and accounts for wide characters/emojis.
+    """
+    clean = strip_ansi(s)
+    width = 0
+    for ch in clean:
+        ea = unicodedata.east_asian_width(ch)
+        if ea in ("W", "F") or ord(ch) > 0x10000:
+            width += 2
+        else:
+            width += 1
+    return width
 
 
 def find_available_port(preferred_port: int = 8765, max_attempts: int = 50) -> int:
@@ -35,7 +59,6 @@ def get_local_ip() -> Optional[str]:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.settimeout(0.5)
-            # Doesn't actually send packets, but prompts OS to select route
             s.connect(("8.8.8.8", 80))
             return s.getsockname()[0]
     except Exception:
@@ -64,9 +87,7 @@ def get_tailscale_ip() -> Optional[str]:
 def sanitize_filename(filename: str, default_name: str = "upload") -> str:
     """Sanitize uploaded filenames to prevent path traversal and unsafe characters."""
     filename = os.path.basename(filename).strip()
-    # Remove null bytes and control chars
     filename = re.sub(r"[\x00-\x1f\x7f]", "", filename)
-    # Replace unsafe characters
     filename = re.sub(r'[\\/:*?"<>|]', "_", filename)
     return filename or default_name
 
@@ -92,8 +113,8 @@ def get_unique_path(directory: Path, filename: str) -> Path:
 
 
 def terminal_hyperlink(url: str, text: Optional[str] = None) -> str:
-    """Return an OSC 8 terminal hyperlink if terminal is interactive."""
+    """Return an OSC 8 terminal hyperlink if stdout/stderr is interactive."""
     display_text = text or url
-    if sys.stdout.isatty():
+    if sys.stderr.isatty():
         return f"\033]8;;{url}\033\\{display_text}\033]8;;\033\\"
     return display_text

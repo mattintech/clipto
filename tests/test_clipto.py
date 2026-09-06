@@ -149,3 +149,17 @@ if __name__ == "__main__":
             urllib.request.urlopen(req)
         except urllib.error.HTTPError as e:
             self.assertIn(e.code, [400, 403, 404])
+
+    def test_visible_width_and_ansi(self):
+        from clipto.utils import strip_ansi, visible_width
+
+        plain = "Hello world"
+        self.assertEqual(visible_width(plain), 11)
+
+        hyperlink = "\033]8;;http://localhost:8765\033\\http://localhost:8765\033]8;;\033\\"
+        self.assertEqual(strip_ansi(hyperlink), "http://localhost:8765")
+        self.assertEqual(visible_width(hyperlink), len("http://localhost:8765"))
+
+        emoji_str = "📎 Clipto v0.1.0"
+        # Emoji 📎 has width 2
+        self.assertEqual(visible_width(emoji_str), 16)
