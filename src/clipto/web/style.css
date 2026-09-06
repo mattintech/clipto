@@ -81,6 +81,14 @@ body {
   -webkit-text-fill-color: transparent;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
 .context-badges {
   display: flex;
   align-items: center;
@@ -923,6 +931,31 @@ body {
   background: rgba(16, 185, 129, 0.25);
   border-color: var(--success);
   color: #fff;
+}
+
+.btn-settings-gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.25s ease;
+  flex-shrink: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.btn-settings-gear:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--primary);
+  color: #fff;
+  transform: rotate(45deg);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
 }
 
 .settings-badge {

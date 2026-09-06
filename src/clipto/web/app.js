@@ -491,7 +491,7 @@
     btnFilesViewGrid.addEventListener('click', () => setFilesViewMode('grid'));
   }
 
-  // Global Escape key handler
+  // Global Escape and Shortcut key handler
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (settingsModal && settingsModal.classList.contains('active')) closeSettingsModal();
@@ -499,6 +499,9 @@
       if (helpModal && helpModal.classList.contains('active')) closeHelpModal();
       if (qrModal && qrModal.classList.contains('active')) closeQrModal();
       if (lightbox && lightbox.classList.contains('active')) closeLightbox();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+      e.preventDefault();
+      openSettingsModal();
     }
   });
 
@@ -1429,6 +1432,8 @@
     if (!hash) return;
     if (hash === '#help') {
       openHelpModal();
+    } else if (hash === '#settings') {
+      openSettingsModal();
     } else if (hash === '#qr') {
       openQrModal();
     } else if (hash === '#files') {

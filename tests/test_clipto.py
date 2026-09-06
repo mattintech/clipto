@@ -594,6 +594,7 @@ class TestCliptoServer(unittest.TestCase):
             output = sys.stderr.getvalue()
             self.assertIn("SHARING FILE", output)
             self.assertIn("test_file.txt", output)
+            self.assertIn("Config:", output)
             self.assertIn("curl -sSL", output)
         finally:
             sys.stderr = old_stderr

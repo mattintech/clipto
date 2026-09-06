@@ -20,6 +20,7 @@ from clipto.tunnel import print_tunnel_guide, start_tunnel, stop_tunnel
 from clipto.utils import (
     find_available_port,
     generate_pin,
+    get_config_file,
     get_local_ip,
     get_tailscale_ip,
     render_qr_terminal,
@@ -232,6 +233,7 @@ def print_banner(
 
     if title:
         lines.append(f"Session:    {title}")
+    lines.append(f"Config:     {get_config_file()}")
     if is_ssl:
         lines.append(f"Security:   Direct TLS / HTTPS Active (Self-Signed / Custom Cert) 🔒")
     elif totp_secret:
