@@ -23,6 +23,7 @@ Ever run an AI agent, Docker container, or SSH session on a remote server, but n
 - **⚡ 1-Click `curl` Copy:** Copy direct `curl` commands from the terminal banner or web UI to pipe files directly to remote servers or terminal sessions.
 - **🖼️ Thumbnail Grid & Lightbox:** Visual thumbnail cards with click-to-enlarge full-screen preview.
 - **🚇 Public HTTPS Tunnels (`--tunnel`):** Instant, secure internet access from cellular or remote servers via Cloudflare Quick Tunnels.
+- **🔒 Direct HTTPS & Self-Signed Certs (`--self-signed` / `--cert`):** Enable local HTTPS so remote/LAN browsers have full clipboard read & write access.
 - **📱 Phone QR Code (`--qr`):** Print a high-contrast terminal QR code or click "Phone QR" in the web UI to snap and upload from your phone camera.
 - **🔐 Authenticator App TOTP (`--totp` / `--totp-setup`):** 6-digit rolling codes with Google Authenticator, Microsoft Authenticator, 1Password, or Apple Passwords.
 - **🔒 PIN & Password Protection (`--pin` / `--pass`):** Protect access with an auto-generated 4-digit PIN or custom passphrase (auto-enabled on `--tunnel`).
@@ -167,6 +168,25 @@ Clipto launches an encrypted, free public HTTPS tunnel via Cloudflare Quick Tunn
 
 ---
 
+## 🔒 Direct HTTPS & Remote Clipboard Access
+
+Modern browsers (Chrome, Safari, Firefox) restrict programmatic clipboard reading (`navigator.clipboard.readText()`) to **Secure Contexts** (HTTPS or `localhost`). When connecting over plain HTTP across your local Wi-Fi or Tailscale network (e.g. `http://192.168.1.100:8765`), browsers block clipboard reading for privacy.
+
+Clipto solves this with zero configuration:
+
+```bash
+# Auto-generate a self-signed TLS cert with Subject Alternative Names (SAN):
+clipto --self-signed
+
+# Or pass your own existing certificate and key:
+clipto --cert /path/to/cert.pem --key /path/to/key.pem
+```
+
+* Clipto generates an SSL certificate stored in `~/.clipto/clipto.crt` with SANs matching `localhost`, `127.0.0.1`, your local LAN IP, and Tailscale IP.
+* When clicking **Copy** or **Paste from Clipboard** in the UI, if the connection is insecure, Clipto displays a clean `Failed to copy/paste to clipboard (?)` toast. Clicking that toast opens an in-depth explanation modal detailing why and showing how to enable HTTPS or use keyboard shortcuts (<kbd>Cmd+V</kbd> / <kbd>Ctrl+V</kbd>).
+
+---
+
 ## 📱 Mobile Uploads
 
 Upload photos, documents, or screenshots directly from your mobile phone:
@@ -211,9 +231,16 @@ The agent gets the exact file path back into its visual/multimodal context!
 ## ⚙️ CLI Reference
 
 ```text
-usage: clipto [-h] [-v] [-p PORT] [--no-hunt] [-d DIR] [-1] [-t TITLE] [-o] [-q] [--pin] [--pass PASSWORD] [--totp] [--totp-setup] [--tunnel [TUNNEL]] [--help-tunnel] [--host HOST] [--timeout TIMEOUT]
+usage: clipto [-h] [-v] [-p PORT] [--no-hunt] [-d DIR] [-1] [-t TITLE] [-o]
+              [-q] [--pin] [--pass PASSWORD] [--totp] [--totp-setup]
+              [--tunnel [TUNNEL]] [--self-signed] [--cert CERT] [--key KEY]
+              [--help-tunnel] [--host HOST] [--timeout TIMEOUT]
+              [share_args ...]
 
 Instant clipboard, screenshot, and file bridge from browser to terminal.
+
+positional arguments:
+  share_args            Optional: 'share [path]' or path to share a specific file or directory.
 
 options:
   -h, --help            show this help message and exit
@@ -231,6 +258,9 @@ options:
   --totp                Protect access with a standard 6-digit TOTP Authenticator code.
   --totp-setup          Initialize or configure TOTP Authenticator with a terminal QR code.
   --tunnel [TUNNEL]     Expose server over an encrypted public HTTPS tunnel.
+  --self-signed         Enable direct HTTPS with an auto-generated self-signed certificate.
+  --cert CERT           Path to custom TLS certificate (.crt or .pem) to enable HTTPS.
+  --key KEY             Path to custom TLS private key (.key or .pem).
   --help-tunnel         Show guide on tunneling and remote connections.
   --host HOST           Host to bind to (default: 0.0.0.0).
   --timeout TIMEOUT     Timeout in seconds (useful with --once).

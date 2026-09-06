@@ -109,6 +109,20 @@ body {
   font-family: var(--font-family);
 }
 
+.badge-warning {
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+  font-family: var(--font-family);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.badge-warning:hover {
+  background: rgba(245, 158, 11, 0.25);
+  border-color: rgba(245, 158, 11, 0.6);
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -613,6 +627,73 @@ body {
 
 .toast.success { border-left-color: var(--success); }
 .toast.error { border-left-color: var(--danger); }
+
+.toast.toast-clickable {
+  cursor: pointer;
+}
+
+.toast.toast-clickable:hover {
+  filter: brightness(1.15);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+}
+
+.toast-help-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.78rem;
+  margin-left: auto;
+  transition: all var(--transition-fast);
+}
+
+.toast:hover .toast-help-badge {
+  background: var(--primary);
+  transform: scale(1.12);
+}
+
+.clipboard-modal-body {
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.clipboard-info-text {
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.clipboard-solution-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  font-size: 0.88rem;
+}
+
+.clipboard-solution-item .solution-num {
+  background: var(--primary);
+  color: #fff;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  margin-top: 2px;
+}
 
 @keyframes slideIn {
   from { transform: translateX(100%); opacity: 0; }

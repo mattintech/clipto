@@ -504,6 +504,65 @@ class TestCliptoServer(unittest.TestCase):
             self.assertTrue(gist_entry["is_gist"])
             self.assertFalse(reg_entry["is_gist"])
 
+    def test_ensure_self_signed_cert(self):
+        from clipto.utils import ensure_self_signed_cert
+        with tempfile.TemporaryDirectory() as tmp_home:
+            old_home = Path.home
+            try:
+                Path.home = lambda: Path(tmp_home)
+                cert_path, key_path = ensure_self_signed_cert()
+                self.assertTrue(cert_path.is_file())
+                self.assertTrue(key_path.is_file())
+                # Calling it again returns the cached cert
+                cert_path2, key_path2 = ensure_self_signed_cert()
+                self.assertEqual(cert_path, cert_path2)
+                self.assertEqual(key_path, key_path2)
+            finally:
+                Path.home = old_home
+
+    def test_ssl_server_and_info(self):
+        import ssl
+        from clipto.utils import ensure_self_signed_cert
+        cert_path, key_path = ensure_self_signed_cert()
+
+        ssl_port = find_available_port(0)
+        ssl_server = CliptoHTTPServer(
+            ("127.0.0.1", ssl_port),
+            CliptoRequestHandler,
+            upload_dir=self.temp_dir,
+            title="SSL Test Session",
+            ssl_cert=cert_path,
+            ssl_key=key_path,
+        )
+        self.assertTrue(ssl_server.is_ssl)
+        ssl_thread = threading.Thread(target=ssl_server.serve_forever, daemon=True)
+        ssl_thread.start()
+        time.sleep(0.1)
+
+        ctx = ssl._create_unverified_context()
+        try:
+            with urllib.request.urlopen(f"https://127.0.0.1:{ssl_port}/api/info", context=ctx) as resp:
+                self.assertEqual(resp.status, 200)
+                data = json.loads(resp.read().decode())
+                self.assertTrue(data["is_ssl"])
+        finally:
+            ssl_server.shutdown()
+            ssl_server.server_close()
+
+    def test_cli_ssl_options(self):
+        from clipto.cli import build_parser
+        parser = build_parser()
+
+        args = parser.parse_args(["--self-signed"])
+        self.assertTrue(args.self_signed)
+        self.assertIsNone(args.cert)
+        self.assertIsNone(args.key)
+
+        args2 = parser.parse_args(["--cert", "cert.pem", "--key", "key.pem"])
+        self.assertFalse(args2.self_signed)
+        self.assertEqual(args2.cert, Path("cert.pem"))
+        self.assertEqual(args2.key, Path("key.pem"))
+
 
 if __name__ == "__main__":
     unittest.main()

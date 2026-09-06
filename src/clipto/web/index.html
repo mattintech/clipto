@@ -62,6 +62,10 @@
           <span class="dot"></span>
           <span class="status-text">Ready</span>
         </div>
+        <div id="tls-warning-badge" class="badge badge-warning hidden" title="Connected over plain HTTP. Programmatic clipboard reading is restricted by browsers. Run clipto with --self-signed or --tunnel.">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          <span>HTTP (Insecure)</span>
+        </div>
       </div>
     </header>
 
@@ -367,6 +371,66 @@
               </li>
             </ul>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Clipboard & Security Info Modal -->
+    <div id="clipboard-modal" class="modal">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content help-modal-content card">
+        <button id="clipboard-modal-close" class="modal-close" title="Close (Esc)">✕</button>
+        <div class="help-header">
+          <h3>📋 Clipboard & Security Info</h3>
+        </div>
+        <div class="clipboard-modal-body">
+          <p class="clipboard-info-text">
+            Modern web browsers restrict the Clipboard API to <strong>Secure Contexts</strong> (HTTPS or <code>localhost</code>).
+            When accessing Clipto over plain HTTP across your local network (e.g. <code>http://192.168.x.x:8765</code>), browsers block reading and automatic clipboard copying for privacy.
+          </p>
+
+          <h4 style="margin-top: 16px; margin-bottom: 10px; color: var(--text-main); font-size: 0.95rem;">How to enable full clipboard access:</h4>
+          
+          <div class="clipboard-solution-item">
+            <span class="solution-num">1</span>
+            <div>
+              <strong>Start Clipto with HTTPS (Self-Signed Cert):</strong>
+              <pre class="help-code">clipto --self-signed</pre>
+              <small class="text-muted">Generates a local TLS cert for your LAN and Tailscale IPs so your browser grants secure clipboard privileges.</small>
+            </div>
+          </div>
+
+          <div class="clipboard-solution-item">
+            <span class="solution-num">2</span>
+            <div>
+              <strong>Or use an encrypted Cloudflare tunnel:</strong>
+              <pre class="help-code">clipto --tunnel</pre>
+              <small class="text-muted">Gives you an automatic public HTTPS link with trusted certificates anywhere in the world.</small>
+            </div>
+          </div>
+
+          <div class="clipboard-solution-item">
+            <span class="solution-num">3</span>
+            <div>
+              <strong>Or connect via localhost:</strong>
+              <p style="margin: 4px 0; font-size: 0.85rem; color: var(--text-muted);">
+                If you are on the host computer, navigate to <code>http://localhost:8765</code> instead of the LAN IP.
+              </p>
+            </div>
+          </div>
+
+          <div class="clipboard-solution-item">
+            <span class="solution-num">⌨</span>
+            <div>
+              <strong>Manual Keyboard Shortcuts:</strong>
+              <p style="margin: 4px 0; font-size: 0.85rem; color: var(--text-muted);">
+                You can always paste manually using <kbd class="kbd">Cmd</kbd>+<kbd class="kbd">V</kbd> / <kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">V</kbd> into the editor, or select text and press <kbd class="kbd">Cmd</kbd>+<kbd class="kbd">C</kbd> / <kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">C</kbd> to copy.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top: 18px; display: flex; justify-content: flex-end; width: 100%;">
+          <button id="clipboard-modal-ok-btn" class="btn btn-primary btn-sm">Got it</button>
         </div>
       </div>
     </div>

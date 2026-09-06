@@ -75,6 +75,8 @@ class CliptoHTTPServer(ThreadingHTTPServer):
         tunnel_url: Optional[str] = None,
         share_mode: bool = False,
         share_file: Optional[Path] = None,
+        ssl_cert: Optional[Path] = None,
+        ssl_key: Optional[Path] = None,
     ):
         super().__init__(server_address, RequestHandlerClass)
         self.upload_dir = Path(upload_dir).resolve()
@@ -86,6 +88,14 @@ class CliptoHTTPServer(ThreadingHTTPServer):
         self.tunnel_url = tunnel_url
         self.share_mode = share_mode
         self.share_file = Path(share_file).resolve() if share_file else None
+        self.ssl_cert = Path(ssl_cert).resolve() if ssl_cert else None
+        self.ssl_key = Path(ssl_key).resolve() if ssl_key else None
+        self.is_ssl = bool(self.ssl_cert and self.ssl_key)
+        if self.is_ssl:
+            import ssl
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(certfile=self.ssl_cert, keyfile=self.ssl_key)
+            self.socket = context.wrap_socket(self.socket, server_side=True)
         self.uploaded_files: List[Path] = []
         self.shutdown_event = threading.Event()
         self.failed_auth_attempts = collections.defaultdict(list)
@@ -99,19 +109,20 @@ class CliptoHTTPServer(ThreadingHTTPServer):
         return self.auth_token
 
     def get_mobile_url(self) -> str:
+        scheme = "https" if self.is_ssl else "http"
         if self.tunnel_url:
             base = self.tunnel_url
         else:
             port = self.server_port
             tailscale_ip = get_tailscale_ip()
             if tailscale_ip:
-                base = f"http://{tailscale_ip}:{port}"
+                base = f"{scheme}://{tailscale_ip}:{port}"
             else:
                 lan_ip = get_local_ip()
                 if lan_ip and lan_ip != "127.0.0.1":
-                    base = f"http://{lan_ip}:{port}"
+                    base = f"{scheme}://{lan_ip}:{port}"
                 else:
-                    base = f"http://localhost:{port}"
+                    base = f"{scheme}://localhost:{port}"
 
         key = self.get_current_auth_key()
         if key:
@@ -278,6 +289,7 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 "auth_type": auth_type,
                 "share_mode": self.server.share_mode,
                 "share_file": self.server.share_file.name if self.server.share_file else None,
+                "is_ssl": self.server.is_ssl,
             })
         elif path == "/api/qr":
             mobile_url = self.server.get_mobile_url()

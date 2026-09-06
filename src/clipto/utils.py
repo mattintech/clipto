@@ -185,3 +185,65 @@ import secrets
 def generate_pin() -> str:
     """Generate a random cryptographically secure 4-digit PIN."""
     return f"{secrets.randbelow(9000) + 1000}"
+
+
+def ensure_self_signed_cert() -> tuple:
+    """
+    Ensure a self-signed TLS certificate and private key exist in ~/.clipto/
+    Generates them via openssl CLI if not already present.
+    Returns (cert_path, key_path).
+    """
+    cert_dir = Path.home() / ".clipto"
+    cert_dir.mkdir(parents=True, exist_ok=True)
+    cert_path = cert_dir / "clipto.crt"
+    key_path = cert_dir / "clipto.key"
+
+    if cert_path.is_file() and key_path.is_file():
+        return cert_path, key_path
+
+    lan_ip = get_local_ip() or "127.0.0.1"
+    tailscale_ip = get_tailscale_ip()
+    san_list = ["DNS:localhost", "IP:127.0.0.1"]
+    if lan_ip != "127.0.0.1":
+        san_list.append(f"IP:{lan_ip}")
+    if tailscale_ip:
+        san_list.append(f"IP:{tailscale_ip}")
+    san_str = ",".join(san_list)
+
+    cmd = [
+        "openssl",
+        "req",
+        "-x509",
+        "-newkey", "rsa:2048",
+        "-keyout", str(key_path),
+        "-out", str(cert_path),
+        "-days", "365",
+        "-nodes",
+        "-subj", "/CN=clipto",
+        "-addext", f"subjectAltName={san_str}",
+    ]
+    try:
+        subprocess.run(cmd, capture_output=True, check=True)
+        key_path.chmod(0o600)
+        return cert_path, key_path
+    except FileNotFoundError:
+        raise RuntimeError("openssl executable not found. Please install openssl or supply --cert and --key.")
+    except subprocess.CalledProcessError:
+        cmd_fallback = [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey", "rsa:2048",
+            "-keyout", str(key_path),
+            "-out", str(cert_path),
+            "-days", "365",
+            "-nodes",
+            "-subj", "/CN=clipto",
+        ]
+        try:
+            subprocess.run(cmd_fallback, capture_output=True, check=True)
+            key_path.chmod(0o600)
+            return cert_path, key_path
+        except Exception as ex:
+            raise RuntimeError(f"Failed to generate self-signed certificate: {ex}")
+

@@ -106,6 +106,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Expose server over an encrypted public HTTPS tunnel (e.g. Cloudflare).",
     )
     parser.add_argument(
+        "--self-signed",
+        action="store_true",
+        help="Enable direct HTTPS with an auto-generated self-signed certificate (allows remote clipboard access).",
+    )
+    parser.add_argument(
+        "--cert",
+        type=Path,
+        default=None,
+        help="Path to custom TLS certificate (.crt or .pem) to enable HTTPS.",
+    )
+    parser.add_argument(
+        "--key",
+        type=Path,
+        default=None,
+        help="Path to custom TLS private key (.key or .pem).",
+    )
+    parser.add_argument(
         "--help-tunnel",
         action="store_true",
         help="Show comprehensive guide on tunneling, remote connections, and SSH port forwarding.",
@@ -135,20 +152,22 @@ def get_mobile_url(
     port: int,
     auth_key: Optional[str] = None,
     tunnel_url: Optional[str] = None,
+    is_ssl: bool = False,
 ) -> str:
     """Determine best URL for mobile access (Tunnel > Tailscale > LAN > Localhost)."""
+    scheme = "https" if is_ssl else "http"
     if tunnel_url:
         base = tunnel_url
     else:
         tailscale_ip = get_tailscale_ip()
         if tailscale_ip:
-            base = f"http://{tailscale_ip}:{port}"
+            base = f"{scheme}://{tailscale_ip}:{port}"
         else:
             lan_ip = get_local_ip()
             if lan_ip and lan_ip != "127.0.0.1":
-                base = f"http://{lan_ip}:{port}"
+                base = f"{scheme}://{lan_ip}:{port}"
             else:
-                base = f"http://localhost:{port}"
+                base = f"{scheme}://localhost:{port}"
 
     if auth_key:
         sep = "&" if "?" in base else "/?"
@@ -176,6 +195,7 @@ def print_banner(
     tunnel_url: Optional[str] = None,
     share_mode: bool = False,
     share_file: Optional[Path] = None,
+    is_ssl: bool = False,
 ):
     current_key = None
     if totp_secret:
@@ -183,8 +203,9 @@ def print_banner(
     elif auth_token:
         current_key = auth_token
 
+    scheme = "https" if is_ssl else "http"
     query_suffix = f"/?k={current_key}" if current_key else ""
-    local_url = f"http://localhost:{port}{query_suffix}"
+    local_url = f"{scheme}://localhost:{port}{query_suffix}"
     lan_ip = get_local_ip()
     tailscale_ip = get_tailscale_ip()
 
@@ -211,7 +232,9 @@ def print_banner(
 
     if title:
         lines.append(f"Session:    {title}")
-    if totp_secret:
+    if is_ssl:
+        lines.append(f"Security:   Direct TLS / HTTPS Active (Self-Signed / Custom Cert) 🔒")
+    elif totp_secret:
         lines.append(f"Security:   TOTP Active (6-digit authenticator) 🔐")
     elif auth_token:
         lines.append(f"PIN / Key:  {auth_token} 🔒")
@@ -222,16 +245,17 @@ def print_banner(
 
     lines.append(f"Local:      {terminal_hyperlink(local_url)}")
     if lan_ip and lan_ip != "127.0.0.1":
-        lan_url = f"http://{lan_ip}:{port}{query_suffix}"
+        lan_url = f"{scheme}://{lan_ip}:{port}{query_suffix}"
         lines.append(f"Network:    {terminal_hyperlink(lan_url)}")
     if tailscale_ip:
-        tail_url = f"http://{tailscale_ip}:{port}{query_suffix}"
+        tail_url = f"{scheme}://{tailscale_ip}:{port}{query_suffix}"
         lines.append(f"Tailscale:  {terminal_hyperlink(tail_url)}")
 
     if share_file:
-        base_dl = tunnel_url or (f"http://{lan_ip}:{port}" if lan_ip and lan_ip != "127.0.0.1" else f"http://localhost:{port}")
+        base_dl = tunnel_url or (f"{scheme}://{lan_ip}:{port}" if lan_ip and lan_ip != "127.0.0.1" else f"{scheme}://localhost:{port}")
         token_dl = f"?k={current_key}" if current_key else ""
-        curl_cmd = f'curl -sSL "{base_dl}/raw/{urllib.parse.quote(share_file.name)}{token_dl}" -o {share_file.name}'
+        insecure_flag = " -k" if is_ssl else ""
+        curl_cmd = f'curl -sSL{insecure_flag} "{base_dl}/raw/{urllib.parse.quote(share_file.name)}{token_dl}" -o {share_file.name}'
         lines.append(f"Curl (CLI): {curl_cmd}")
 
     max_w = max(visible_width(line) for line in lines)
@@ -334,6 +358,29 @@ def main():
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
 
+    # Determine TLS / SSL
+    ssl_cert = None
+    ssl_key = None
+    if args.self_signed:
+        try:
+            from clipto.utils import ensure_self_signed_cert
+            ssl_cert, ssl_key = ensure_self_signed_cert()
+        except Exception as e:
+            print(f"Error enabling self-signed HTTPS: {e}", file=sys.stderr)
+            sys.exit(1)
+    elif args.cert or args.key:
+        if not (args.cert and args.key):
+            print("Error: Both --cert and --key must be provided together.", file=sys.stderr)
+            sys.exit(1)
+        ssl_cert = args.cert.resolve()
+        ssl_key = args.key.resolve()
+        if not ssl_cert.is_file():
+            print(f"Error: Certificate file '{args.cert}' not found.", file=sys.stderr)
+            sys.exit(1)
+        if not ssl_key.is_file():
+            print(f"Error: Private key file '{args.key}' not found.", file=sys.stderr)
+            sys.exit(1)
+
     # Handle public tunnel
     tunnel_url = None
     tunnel_proc = None
@@ -360,6 +407,8 @@ def main():
             tunnel_url=tunnel_url,
             share_mode=share_mode,
             share_file=share_file,
+            ssl_cert=ssl_cert,
+            ssl_key=ssl_key,
         )
     except OSError as e:
         stop_tunnel(tunnel_proc)
@@ -377,11 +426,13 @@ def main():
         tunnel_url=tunnel_url,
         share_mode=share_mode,
         share_file=share_file,
+        is_ssl=server.is_ssl,
     )
 
     if args.open:
         active_key = server.get_current_auth_key()
-        target_open = tunnel_url or f"http://localhost:{port}"
+        scheme = "https" if server.is_ssl else "http"
+        target_open = tunnel_url or f"{scheme}://localhost:{port}"
         query_suffix = f"/?k={active_key}" if active_key else ""
         hash_suffix = ""
         if share_file:

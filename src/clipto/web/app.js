@@ -8,6 +8,8 @@
   const dirDisplay = document.getElementById('dir-display');
   const sessionTitle = document.getElementById('session-title');
   const connectionStatus = document.getElementById('connection-status');
+  const tlsWarningBadge = document.getElementById('tls-warning-badge');
+  const isSecure = window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
   const uploadsList = document.getElementById('uploads-list');
   const uploadCountBadge = document.getElementById('upload-count');
   const toastContainer = document.getElementById('toast-container');
@@ -66,6 +68,12 @@
   const helpTabBtns = helpModal.querySelectorAll('.help-tab-btn');
   const helpTabPanels = helpModal.querySelectorAll('.help-tab-panel');
 
+  // Clipboard Info Modal elements
+  const clipboardModal = document.getElementById('clipboard-modal');
+  const clipboardModalClose = document.getElementById('clipboard-modal-close');
+  const clipboardModalBackdrop = clipboardModal ? clipboardModal.querySelector('.modal-backdrop') : null;
+  const clipboardModalOkBtn = document.getElementById('clipboard-modal-ok-btn');
+
   // Lightbox elements
   const lightbox = document.getElementById('lightbox');
   const lightboxImg = document.getElementById('lightbox-img');
@@ -109,18 +117,74 @@
   }
 
   // Toast notifications
-  function showToast(message, type = 'success') {
+  function showToast(message, type = 'success', duration = 4000, options = {}) {
     const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.innerHTML = `<span>${message}</span>`;
+    const isHelp = !!options.help;
+    toast.className = `toast ${type}${isHelp ? ' toast-clickable' : ''}`;
+
+    const textSpan = document.createElement('span');
+    textSpan.textContent = message;
+    toast.appendChild(textSpan);
+
+    if (isHelp) {
+      const helpBadge = document.createElement('span');
+      helpBadge.className = 'toast-help-badge';
+      helpBadge.textContent = '(?)';
+      helpBadge.title = 'Why? Click for details';
+      toast.appendChild(helpBadge);
+    }
+
     toastContainer.appendChild(toast);
 
-    setTimeout(() => {
+    let isDismissed = false;
+    function dismiss() {
+      if (isDismissed) return;
+      isDismissed = true;
       toast.style.opacity = '0';
       toast.style.transform = 'translateY(10px)';
       toast.style.transition = 'all 0.3s ease';
       setTimeout(() => toast.remove(), 300);
-    }, 4000);
+    }
+
+    const timer = setTimeout(dismiss, duration);
+
+    if (isHelp) {
+      toast.addEventListener('click', () => {
+        clearTimeout(timer);
+        dismiss();
+        openClipboardModal(options.reason);
+      });
+    }
+  }
+
+  // Universal clipboard copy helper with fallback
+  async function copyTextToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return { ok: true };
+      } catch (err) {
+        // Fall through to execCommand
+      }
+    }
+
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      ta.style.top = '-9999px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const successful = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (successful) return { ok: true };
+    } catch (e) {
+      // Both failed
+    }
+
+    return { ok: false };
   }
 
   // Format file size
@@ -162,13 +226,13 @@
 
   btnCopyUrl.addEventListener('click', async () => {
     if (!currentMobileUrl) return;
-    try {
-      await navigator.clipboard.writeText(currentMobileUrl);
+    const res = await copyTextToClipboard(currentMobileUrl);
+    if (res.ok) {
       btnCopyUrl.textContent = 'Copied!';
-      setTimeout(() => btnCopyUrl.textContent = 'Copy', 2000);
+      setTimeout(() => (btnCopyUrl.textContent = 'Copy'), 2000);
       showToast('URL copied to clipboard');
-    } catch (err) {
-      showToast('Could not copy to clipboard', 'error');
+    } else {
+      showToast('Failed to copy to clipboard', 'error', 6000, { help: true });
     }
   });
 
@@ -197,12 +261,31 @@
     });
   });
 
+  // Clipboard Info Modal functions
+  function openClipboardModal(reason) {
+    if (!clipboardModal) return;
+    const reasonEl = document.getElementById('clipboard-modal-reason');
+    if (reasonEl && reason) {
+      reasonEl.textContent = reason;
+    }
+    clipboardModal.classList.add('active');
+  }
+
+  function closeClipboardModal() {
+    if (clipboardModal) clipboardModal.classList.remove('active');
+  }
+
+  if (clipboardModalClose) clipboardModalClose.addEventListener('click', closeClipboardModal);
+  if (clipboardModalBackdrop) clipboardModalBackdrop.addEventListener('click', closeClipboardModal);
+  if (clipboardModalOkBtn) clipboardModalOkBtn.addEventListener('click', closeClipboardModal);
+
   // Global Escape key handler
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if (helpModal.classList.contains('active')) closeHelpModal();
-      if (qrModal.classList.contains('active')) closeQrModal();
-      if (lightbox.classList.contains('active')) closeLightbox();
+      if (clipboardModal && clipboardModal.classList.contains('active')) closeClipboardModal();
+      if (helpModal && helpModal.classList.contains('active')) closeHelpModal();
+      if (qrModal && qrModal.classList.contains('active')) closeQrModal();
+      if (lightbox && lightbox.classList.contains('active')) closeLightbox();
     }
   });
 
@@ -513,14 +596,17 @@
   }
 
   // Copy curl helper
-  function copyCurlForFile(rawUrl, filename) {
+  async function copyCurlForFile(rawUrl, filename) {
     const origin = window.location.origin;
-    const curlCmd = `curl -sSL "${origin}${rawUrl}" -o ${filename}`;
-    navigator.clipboard.writeText(curlCmd).then(() => {
+    const isSsl = window.location.protocol === 'https:';
+    const insecureFlag = isSsl && (!isSecure || window.location.hostname !== 'localhost') ? ' -k' : '';
+    const curlCmd = `curl -sSL${insecureFlag} "${origin}${rawUrl}" -o ${filename}`;
+    const res = await copyTextToClipboard(curlCmd);
+    if (res.ok) {
       showToast(`Copied curl command for ${filename}`);
-    }).catch(() => {
-      showToast('Failed to copy curl command', 'error');
-    });
+    } else {
+      showToast('Failed to copy to clipboard', 'error', 6000, { help: true });
+    }
   }
 
   fileSearchInput.addEventListener('input', renderFiles);
@@ -575,20 +661,26 @@
 
   // Paste from clipboard button
   btnGistPasteClipboard.addEventListener('click', async () => {
+    if (!isSecure || !navigator.clipboard || !navigator.clipboard.readText) {
+      showToast('Failed to paste from clipboard', 'error', 6000, { help: true });
+      gistNewContent.focus();
+      return;
+    }
+
     try {
-      if (navigator.clipboard && navigator.clipboard.readText) {
-        const text = await navigator.clipboard.readText();
-        if (text) {
-          gistNewContent.value = text;
-          showToast('Pasted clipboard contents into editor');
-          return;
-        }
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        gistNewContent.value = text;
+        showToast('Pasted clipboard contents into editor');
+        gistNewContent.focus();
+      } else {
+        showToast('Clipboard is currently empty', 'info');
+        gistNewContent.focus();
       }
     } catch (err) {
-      // Permission restricted or rejected
+      showToast('Failed to paste from clipboard', 'error', 6000, { help: true });
+      gistNewContent.focus();
     }
-    gistNewContent.focus();
-    showToast('Press Cmd+V / Ctrl+V to paste into the editor', 'info');
   });
 
   // Save new gist
@@ -707,8 +799,8 @@
       showToast('No gist content to copy', 'error');
       return;
     }
-    try {
-      await navigator.clipboard.writeText(currentRawGistText);
+    const res = await copyTextToClipboard(currentRawGistText);
+    if (res.ok) {
       const span = btnGistCopyRaw.querySelector('span');
       const orig = span ? span.textContent : 'Copy Gist';
       if (span) span.textContent = '✓ Copied!';
@@ -718,8 +810,8 @@
         btnGistCopyRaw.classList.remove('copied');
       }, 2000);
       showToast(`Copied ${currentGistFilename} to clipboard`);
-    } catch (err) {
-      showToast('Failed to copy to clipboard', 'error');
+    } else {
+      showToast('Failed to copy to clipboard', 'error', 6000, { help: true });
     }
   });
 
@@ -1029,6 +1121,13 @@
   // Initialization & Auto-Auth Check
   async function init() {
     setViewMode(currentViewMode);
+
+    if (!isSecure && tlsWarningBadge) {
+      tlsWarningBadge.classList.remove('hidden');
+      tlsWarningBadge.addEventListener('click', () => {
+        openClipboardModal();
+      });
+    }
 
     // Check for query parameter ?k=... for magic link / QR code instant login
     const params = new URLSearchParams(window.location.search);
