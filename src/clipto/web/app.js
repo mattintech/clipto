@@ -4,7 +4,9 @@
   const fileInput = document.getElementById('file-input');
   const noteInput = document.getElementById('note-input');
   const btnSendNote = document.getElementById('btn-send-note');
+  const btnHost = document.getElementById('btn-host');
   const hostnameDisplay = document.getElementById('hostname-display');
+  let currentHostname = 'localhost';
   const dirDisplay = document.getElementById('dir-display');
   const sessionTitle = document.getElementById('session-title');
   const connectionStatus = document.getElementById('connection-status');
@@ -1247,7 +1249,14 @@
       if (!res.ok) throw new Error('Failed to fetch info');
       const data = await res.json();
 
-      hostnameDisplay.textContent = data.hostname || 'localhost';
+      currentHostname = data.hostname || 'localhost';
+      if (hostnameDisplay) {
+        hostnameDisplay.textContent = currentHostname;
+      }
+      if (btnHost) {
+        btnHost.title = `Host Machine: ${currentHostname} (click to copy)`;
+        btnHost.setAttribute('aria-label', `Host: ${currentHostname}`);
+      }
       dirDisplay.textContent = data.dir || '.';
       isOnceMode = !!data.once;
       currentMobileUrl = data.mobile_url || window.location.href;
@@ -1493,6 +1502,18 @@
       tlsWarningBadge.classList.remove('hidden');
       tlsWarningBadge.addEventListener('click', () => {
         openClipboardModal();
+      });
+    }
+
+    if (btnHost) {
+      btnHost.addEventListener('click', async () => {
+        const host = currentHostname || 'localhost';
+        const res = await copyTextToClipboard(host);
+        if (res.ok) {
+          showToast(`Copied host "${host}" to clipboard`, 'success');
+        } else {
+          showToast(`Host: ${host}`, 'info');
+        }
       });
     }
 
