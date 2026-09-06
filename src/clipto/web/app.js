@@ -157,34 +157,18 @@
     }
   }
 
-  // Universal clipboard copy helper with fallback
+  // Universal clipboard copy helper (requires secure context)
   async function copyTextToClipboard(text) {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      try {
-        await navigator.clipboard.writeText(text);
-        return { ok: true };
-      } catch (err) {
-        // Fall through to execCommand
-      }
+    if (!isSecure || !navigator.clipboard || !navigator.clipboard.writeText) {
+      return { ok: false };
     }
 
     try {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.left = '-9999px';
-      ta.style.top = '-9999px';
-      document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      const successful = document.execCommand('copy');
-      document.body.removeChild(ta);
-      if (successful) return { ok: true };
-    } catch (e) {
-      // Both failed
+      await navigator.clipboard.writeText(text);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false };
     }
-
-    return { ok: false };
   }
 
   // Format file size
