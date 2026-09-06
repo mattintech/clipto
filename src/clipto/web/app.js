@@ -129,7 +129,7 @@
     if (isHelp) {
       const helpBadge = document.createElement('span');
       helpBadge.className = 'toast-help-badge';
-      helpBadge.textContent = '(?)';
+      helpBadge.textContent = '?';
       helpBadge.title = 'Why? Click for details';
       toast.appendChild(helpBadge);
     }

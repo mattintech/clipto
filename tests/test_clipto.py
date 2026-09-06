@@ -549,6 +549,47 @@ class TestCliptoServer(unittest.TestCase):
             ssl_server.shutdown()
             ssl_server.server_close()
 
+    def test_ssl_server_http_redirect(self):
+        import ssl
+        from clipto.utils import ensure_self_signed_cert
+        cert_path, key_path = ensure_self_signed_cert()
+
+        ssl_port = find_available_port(0)
+        ssl_server = CliptoHTTPServer(
+            ("127.0.0.1", ssl_port),
+            CliptoRequestHandler,
+            upload_dir=self.temp_dir,
+            title="SSL Redirect Session",
+            ssl_cert=cert_path,
+            ssl_key=key_path,
+        )
+        ssl_thread = threading.Thread(target=ssl_server.serve_forever, daemon=True)
+        ssl_thread.start()
+        time.sleep(0.1)
+
+        ctx = ssl._create_unverified_context()
+        try:
+            class NoRedirect(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, req, fp, code, msg, headers, newurl):
+                    return None
+
+            opener = urllib.request.build_opener(NoRedirect)
+            try:
+                opener.open(f"http://127.0.0.1:{ssl_port}/api/info")
+                self.fail("Expected HTTP 307 redirect")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 307)
+                self.assertTrue(e.headers.get("Location").startswith(f"https://127.0.0.1:{ssl_port}"))
+
+            opener_follow = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+            with opener_follow.open(f"http://127.0.0.1:{ssl_port}/api/info") as resp:
+                self.assertEqual(resp.status, 200)
+                data = json.loads(resp.read().decode())
+                self.assertTrue(data["is_ssl"])
+        finally:
+            ssl_server.shutdown()
+            ssl_server.server_close()
+
     def test_cli_ssl_options(self):
         from clipto.cli import build_parser
         parser = build_parser()

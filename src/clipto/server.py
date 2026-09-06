@@ -91,16 +91,73 @@ class CliptoHTTPServer(ThreadingHTTPServer):
         self.ssl_cert = Path(ssl_cert).resolve() if ssl_cert else None
         self.ssl_key = Path(ssl_key).resolve() if ssl_key else None
         self.is_ssl = bool(self.ssl_cert and self.ssl_key)
+        self.ssl_context = None
         if self.is_ssl:
             import ssl
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.load_cert_chain(certfile=self.ssl_cert, keyfile=self.ssl_key)
-            self.socket = context.wrap_socket(self.socket, server_side=True)
+            self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            self.ssl_context.load_cert_chain(certfile=self.ssl_cert, keyfile=self.ssl_key)
         self.uploaded_files: List[Path] = []
         self.shutdown_event = threading.Event()
         self.failed_auth_attempts = collections.defaultdict(list)
         self.authenticated_sessions: Set[str] = set()
         self.auth_lock = threading.Lock()
+
+    def finish_request(self, request, client_address):
+        if not self.is_ssl or not self.ssl_context:
+            super().finish_request(request, client_address)
+            return
+
+        import ssl
+        try:
+            request.settimeout(5.0)
+            peek = request.recv(1, socket.MSG_PEEK)
+            if not peek:
+                return
+
+            if peek[0] == 0x16:
+                # TLS ClientHello -> wrap with TLS and process HTTPS request
+                tls_sock = self.ssl_context.wrap_socket(request, server_side=True)
+                try:
+                    self.RequestHandlerClass(tls_sock, client_address, self)
+                finally:
+                    try:
+                        tls_sock.close()
+                    except Exception:
+                        pass
+            else:
+                # Plain HTTP connection sent to HTTPS port -> Redirect to HTTPS
+                rfile = request.makefile("rb", -1)
+                req_line = rfile.readline().decode("iso-8859-1", errors="replace")
+                if not req_line:
+                    return
+                words = req_line.rstrip("\r\n").split()
+                path = words[1] if len(words) >= 2 else "/"
+                host = None
+                while True:
+                    line = rfile.readline().decode("iso-8859-1", errors="replace")
+                    if not line or line in ("\r\n", "\n"):
+                        break
+                    if line.lower().startswith("host:"):
+                        host = line.split(":", 1)[1].strip()
+
+                if not host:
+                    host = f"{self.server_name}:{self.server_port}"
+
+                redirect_url = f"https://{host}{path}"
+                body = f'<html><body>Redirecting to <a href="{redirect_url}">{redirect_url}</a></body></html>\n'.encode("utf-8")
+                resp = (
+                    b"HTTP/1.1 307 Temporary Redirect\r\n"
+                    + f"Location: {redirect_url}\r\n".encode("utf-8")
+                    + b"Content-Type: text/html; charset=utf-8\r\n"
+                    + f"Content-Length: {len(body)}\r\n".encode("utf-8")
+                    + b"Connection: close\r\n\r\n"
+                    + body
+                )
+                request.sendall(resp)
+        except (ssl.SSLError, socket.timeout, ConnectionResetError, BrokenPipeError):
+            pass
+        except Exception:
+            pass
 
     def get_current_auth_key(self) -> Optional[str]:
         """Return the active auth key (dynamic TOTP code or static PIN)."""
