@@ -17,21 +17,20 @@
   // Nav Tabs elements
   const tabBtnDropzone = document.getElementById('tab-btn-dropzone');
   const tabBtnFiles = document.getElementById('tab-btn-files');
+  const tabBtnGist = document.getElementById('tab-btn-gist');
   const panelDropzone = document.getElementById('panel-dropzone');
   const panelFiles = document.getElementById('panel-files');
+  const panelGist = document.getElementById('panel-gist');
   const filesBadgeCount = document.getElementById('files-badge-count');
 
-  // Files & Gists Panel elements
+  // Files Browser elements
   const fileSearchInput = document.getElementById('file-search-input');
   const filesFilterStatus = document.getElementById('files-filter-status');
   const btnRefreshFiles = document.getElementById('btn-refresh-files');
   const filesListBody = document.getElementById('files-list-body');
 
-  // Gist Modal elements
-  const gistModal = document.getElementById('gist-modal');
-  const gistModalClose = document.getElementById('gist-modal-close');
-  const gistModalBackdrop = gistModal.querySelector('.modal-backdrop');
-  const gistFilename = document.getElementById('gist-filename');
+  // Dedicated Gist Panel elements
+  const gistFileSelect = document.getElementById('gist-file-select');
   const gistMetaBadge = document.getElementById('gist-meta-badge');
   const btnGistCopyRaw = document.getElementById('btn-gist-copy-raw');
   const btnGistDownload = document.getElementById('btn-gist-download');
@@ -189,7 +188,6 @@
   // Global Escape key handler
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if (gistModal.classList.contains('active')) closeGistModal();
       if (helpModal.classList.contains('active')) closeHelpModal();
       if (qrModal.classList.contains('active')) closeQrModal();
       if (lightbox.classList.contains('active')) closeLightbox();
@@ -305,39 +303,55 @@
 
   // Tab navigation handler
   function switchTab(tabName, updateHash = false) {
+    const tabs = [
+      { name: 'dropzone', btn: tabBtnDropzone, panel: panelDropzone },
+      { name: 'files', btn: tabBtnFiles, panel: panelFiles },
+      { name: 'gist', btn: tabBtnGist, panel: panelGist },
+    ];
+
+    tabs.forEach((t) => {
+      const active = t.name === tabName;
+      if (t.btn) {
+        t.btn.classList.toggle('active', active);
+        t.btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      }
+      if (t.panel) {
+        t.panel.classList.toggle('active', active);
+      }
+    });
+
     if (tabName === 'files') {
-      tabBtnFiles.classList.add('active');
-      tabBtnFiles.setAttribute('aria-selected', 'true');
-      tabBtnDropzone.classList.remove('active');
-      tabBtnDropzone.setAttribute('aria-selected', 'false');
-
-      panelFiles.classList.add('active');
-      panelDropzone.classList.remove('active');
-
       if (allFiles.length === 0) {
         loadFiles();
       }
-    } else {
-      tabBtnDropzone.classList.add('active');
-      tabBtnDropzone.setAttribute('aria-selected', 'true');
-      tabBtnFiles.classList.remove('active');
-      tabBtnFiles.setAttribute('aria-selected', 'false');
-
-      panelDropzone.classList.add('active');
-      panelFiles.classList.remove('active');
+    } else if (tabName === 'gist') {
+      if (allFiles.length === 0) {
+        loadFiles().then(() => {
+          if (!currentGistFilename && allFiles.length > 0) {
+            const firstText = allFiles.find((f) => f.is_text);
+            if (firstText) openGist(firstText.name, false);
+          }
+        });
+      } else if (!currentGistFilename) {
+        const firstText = allFiles.find((f) => f.is_text);
+        if (firstText) openGist(firstText.name, false);
+      }
     }
 
     if (updateHash) {
-      if (tabName === 'files' && window.location.hash !== '#files') {
-        window.history.replaceState(null, '', '#files');
-      } else if (tabName === 'dropzone' && window.location.hash !== '#dropzone') {
-        window.history.replaceState(null, '', '#dropzone');
+      if (tabName === 'gist') {
+        const hash = currentGistFilename ? `#gist=${encodeURIComponent(currentGistFilename)}` : '#gist';
+        if (window.location.hash !== hash) window.history.replaceState(null, '', hash);
+      } else {
+        const hash = `#${tabName}`;
+        if (window.location.hash !== hash) window.history.replaceState(null, '', hash);
       }
     }
   }
 
   tabBtnDropzone.addEventListener('click', () => switchTab('dropzone', true));
   tabBtnFiles.addEventListener('click', () => switchTab('files', true));
+  tabBtnGist.addEventListener('click', () => switchTab('gist', true));
 
   // File type icon helper (Material flat SVG)
   function getFileIconSvg(file) {
@@ -370,6 +384,19 @@
       allFiles = data.files || [];
       filesBadgeCount.textContent = data.count !== undefined ? data.count : allFiles.length;
       renderFiles();
+
+      // Populate Gist dropdown with text files
+      const textFiles = allFiles.filter((f) => f.is_text);
+      if (textFiles.length > 0) {
+        gistFileSelect.innerHTML = textFiles
+          .map((f) => `<option value="${f.name}">${f.name}</option>`)
+          .join('');
+        if (currentGistFilename && textFiles.some((f) => f.name === currentGistFilename)) {
+          gistFileSelect.value = currentGistFilename;
+        }
+      } else {
+        gistFileSelect.innerHTML = '<option value="">No text files in directory</option>';
+      }
     } catch (err) {
       filesListBody.innerHTML = `<tr><td colspan="4" class="empty-state" style="color: var(--danger)">Error loading files: ${err.message}</td></tr>`;
     }
@@ -437,7 +464,7 @@
 
       const nameLink = tr.querySelector('.file-name-link');
       if (file.is_text) {
-        nameLink.addEventListener('click', () => openGist(file.name));
+        nameLink.addEventListener('click', () => openGist(file.name, true));
       } else if (file.is_image) {
         nameLink.addEventListener('click', () => openLightbox(file.raw_url, file.name));
       } else {
@@ -447,7 +474,7 @@
 
       const btnGist = tr.querySelector('[data-action="gist"]');
       if (btnGist) {
-        btnGist.addEventListener('click', () => openGist(file.name));
+        btnGist.addEventListener('click', () => openGist(file.name, true));
       }
 
       const btnCurl = tr.querySelector('[data-action="curl"]');
@@ -476,25 +503,34 @@
     showToast('Files refreshed');
   });
 
-  // Gist Modal functions
-  async function openGist(filename) {
-    gistModal.classList.add('active');
-    gistFilename.textContent = filename;
+  // Gist Panel functions
+  gistFileSelect.addEventListener('change', () => {
+    const selected = gistFileSelect.value;
+    if (selected) {
+      openGist(selected, true);
+    }
+  });
+
+  async function openGist(filename, updateHash = true) {
+    switchTab('gist', false);
+    currentGistFilename = filename;
+    if (gistFileSelect && gistFileSelect.value !== filename) {
+      gistFileSelect.value = filename;
+    }
     gistMetaBadge.textContent = 'Loading...';
     gistLineNumbers.textContent = '';
     gistCodeContent.textContent = 'Fetching file content...';
     currentRawGistText = '';
-    currentGistFilename = filename;
 
-    // Update URL hash without reload
-    window.history.replaceState(null, '', `#gist=${encodeURIComponent(filename)}`);
+    if (updateHash) {
+      window.history.replaceState(null, '', `#gist=${encodeURIComponent(filename)}`);
+    }
 
     try {
       const res = await fetch(`/api/content?name=${encodeURIComponent(filename)}`);
       if (res.status === 401) {
         lockScreen.classList.remove('hidden');
         authInput.focus();
-        closeGistModal();
         return;
       }
       if (!res.ok) {
@@ -520,16 +556,6 @@
       showToast(err.message, 'error');
     }
   }
-
-  function closeGistModal() {
-    gistModal.classList.remove('active');
-    if (window.location.hash.startsWith('#gist=')) {
-      window.history.replaceState(null, '', '#files');
-    }
-  }
-
-  gistModalClose.addEventListener('click', closeGistModal);
-  gistModalBackdrop.addEventListener('click', closeGistModal);
 
   btnGistCopyRaw.addEventListener('click', async () => {
     if (!currentRawGistText) return;
@@ -838,10 +864,11 @@
       switchTab('files');
     } else if (hash === '#dropzone') {
       switchTab('dropzone');
+    } else if (hash === '#gist') {
+      switchTab('gist');
     } else if (hash.startsWith('#gist=')) {
       const filename = decodeURIComponent(hash.substring(6));
-      switchTab('files');
-      openGist(filename);
+      openGist(filename, false);
     }
   }
 

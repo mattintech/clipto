@@ -1170,34 +1170,32 @@ body {
   border-color: var(--primary);
 }
 
-/* Gist Modal Styles */
-.gist-modal-content {
-  max-width: 920px;
-  width: 95%;
-  max-height: 85vh;
-  display: flex;
-  flex-direction: column;
+/* Gist Panel & Card Styles */
+.gist-card {
   padding: 0;
   overflow: hidden;
-  text-align: left;
+  display: flex;
+  flex-direction: column;
+  min-height: 480px;
 }
 
-.gist-modal-header {
+.gist-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 20px;
+  padding: 12px 18px;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(15, 23, 42, 0.7);
+  background: rgba(15, 23, 42, 0.6);
   gap: 12px;
   flex-wrap: wrap;
 }
 
-.gist-modal-title-wrap {
+.gist-toolbar-left {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-width: 0;
+  flex: 1;
+  min-width: 240px;
 }
 
 .gist-icon {
@@ -1206,26 +1204,36 @@ body {
   align-items: center;
 }
 
-#gist-filename {
-  font-size: 1rem;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 340px;
+.gist-file-select {
+  background: var(--bg-base);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 7px 12px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  outline: none;
+  cursor: pointer;
+  max-width: 320px;
+  transition: border-color 0.15s ease;
 }
 
-.gist-modal-actions {
+.gist-file-select:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+.gist-toolbar-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.gist-body {
+.gist-code-wrapper {
   display: flex;
   flex: 1;
-  min-height: 200px;
-  max-height: 70vh;
+  min-height: 380px;
+  max-height: 72vh;
   overflow: auto;
   background: #0b101b;
 }
@@ -1273,10 +1281,10 @@ body {
   .files-table td.td-time {
     display: none;
   }
-  #gist-filename {
-    max-width: 150px;
+  .gist-file-select {
+    max-width: 180px;
   }
-  .gist-modal-actions .btn span {
+  .gist-toolbar-actions .btn span {
     display: none;
   }
 }
