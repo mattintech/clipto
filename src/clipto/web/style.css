@@ -818,3 +818,102 @@ body {
   30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
   40%, 60% { transform: translate3d(4px, 0, 0); }
 }
+
+/* Help Badge & Modal Styles */
+.help-badge {
+  cursor: pointer;
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #6ee7b7;
+  transition: all 0.15s ease;
+}
+
+.help-badge:hover {
+  background: rgba(16, 185, 129, 0.25);
+  border-color: var(--success);
+  color: #fff;
+}
+
+.help-modal-content {
+  max-width: 560px;
+  width: 95%;
+  text-align: left;
+  align-items: stretch;
+}
+
+.help-header h3 {
+  font-size: 1.2rem;
+  margin-bottom: 12px;
+}
+
+.help-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.help-tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  padding: 8px 12px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.help-tab-btn:hover {
+  color: var(--text-main);
+}
+
+.help-tab-btn.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.help-tab-panel {
+  display: none;
+  animation: fadeIn 0.2s ease;
+}
+
+.help-tab-panel.active {
+  display: block;
+}
+
+.help-tab-panel h4 {
+  font-size: 0.95rem;
+  color: #cbd5e1;
+  margin-bottom: 10px;
+}
+
+.help-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+.help-list li {
+  line-height: 1.5;
+}
+
+.help-list strong {
+  color: var(--text-main);
+}
+
+.help-code {
+  background: #0f172a;
+  border: 1px solid var(--border-color);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-family: monospace;
+  font-size: 0.82rem;
+  color: #a5b4fc;
+  margin-top: 6px;
+  overflow-x: auto;
+}

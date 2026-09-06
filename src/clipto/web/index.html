@@ -46,6 +46,10 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
           <span>Phone QR</span>
         </button>
+        <button id="btn-help-guide" class="badge help-badge" title="Help & Connection Guide">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          <span>Help</span>
+        </button>
         <div class="badge host-badge" title="Host Machine">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
           <span id="hostname-display">Connecting...</span>
@@ -135,7 +139,7 @@
         <button id="qr-modal-close" class="modal-close" title="Close (Esc)">✕</button>
         <div class="modal-header">
           <h3>📱 Upload from Phone</h3>
-          <p class="modal-subtitle">Scan this QR code with your phone camera to open Clipto on your Wi-Fi/network:</p>
+          <p class="modal-subtitle">Scan this QR code with your phone camera to open Clipto on your Wi-Fi or tunnel:</p>
         </div>
         <div id="qr-svg-container" class="qr-svg-container">
           <img id="qr-img" src="/api/qr" alt="QR Code" width="220" height="220">
@@ -143,6 +147,60 @@
         <div class="qr-url-box">
           <code id="qr-url-display">http://...</code>
           <button id="btn-copy-url" class="btn btn-secondary btn-sm">Copy</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Help & Guide Modal -->
+    <div id="help-modal" class="modal">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content help-modal-content card">
+        <button id="help-modal-close" class="modal-close" title="Close (Esc)">✕</button>
+        <div class="help-header">
+          <h3>📖 Clipto Connection & Usage Guide</h3>
+        </div>
+
+        <div class="help-tabs">
+          <button class="help-tab-btn active" data-tab="tab-remote">Remote & Tunnels</button>
+          <button class="help-tab-btn" data-tab="tab-security">Security & PIN</button>
+          <button class="help-tab-btn" data-tab="tab-tips">Tips & AI</button>
+        </div>
+
+        <div class="help-tab-body">
+          <!-- Tab 1 -->
+          <div id="tab-remote" class="help-tab-panel active">
+            <h4>When do I need a tunnel?</h4>
+            <ul class="help-list">
+              <li><strong>Same Wi-Fi / Local Network:</strong> No tunnel needed! Use the <code>Network: http://192.168.x.x</code> address or scan the <strong>Phone QR</strong> code.</li>
+              <li><strong>Cellular Data / Remote Cloud VM:</strong> Start with <code>clipto --tunnel</code> for an instant encrypted public HTTPS address reachable from anywhere.</li>
+              <li><strong>SSH Port Forwarding:</strong> If already SSH'd into your server, forward the port locally without tunnels:
+                <pre class="help-code">ssh -N -L 8765:localhost:8765 user@remote</pre>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Tab 2 -->
+          <div id="tab-security" class="help-tab-panel">
+            <h4>How does session security work?</h4>
+            <ul class="help-list">
+              <li><strong>Automatic PIN:</strong> When using <code>--tunnel</code> or <code>--pin</code>, Clipto generates a 4-digit PIN to block internet crawlers.</li>
+              <li><strong>Zero-Typing Magic Link:</strong> Your terminal link and QR code already have <code>?k=PIN</code> embedded, logging you in instantly without typing!</li>
+              <li><strong>Brute-Force Protection:</strong> After 5 failed attempts in 1 minute, the server locks out the client with HTTP 429.</li>
+            </ul>
+          </div>
+
+          <!-- Tab 3 -->
+          <div id="tab-tips" class="help-tab-panel">
+            <h4>Pro Tips & AI Workflows</h4>
+            <ul class="help-list">
+              <li><strong>Instant Paste:</strong> Smash <kbd class="kbd">Cmd</kbd>+<kbd class="kbd">V</kbd> anywhere on the page—no clicks needed.</li>
+              <li><strong>Thumbnail Grid:</strong> Click any thumbnail image to inspect it full-screen in a lightbox.</li>
+              <li><strong>AI Agent One-Shot Mode:</strong>
+                <pre class="help-code">FILE=$(clipto --once --timeout 120)</pre>
+                Waits for your screenshot, saves it, and outputs the path directly to your AI agent!
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
     </div>

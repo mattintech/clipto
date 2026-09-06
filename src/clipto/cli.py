@@ -1,4 +1,5 @@
 import argparse
+import atexit
 import os
 import sys
 import threading
@@ -9,6 +10,7 @@ from typing import Optional
 
 from clipto import __version__
 from clipto.server import CliptoHTTPServer, CliptoRequestHandler
+from clipto.tunnel import print_tunnel_guide, start_tunnel, stop_tunnel
 from clipto.utils import (
     find_available_port,
     generate_pin,
@@ -66,7 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-q", "--qr",
         action="store_true",
-        help="Display a terminal QR code for the network URL (easy mobile phone scanning).",
+        help="Display a terminal QR code for the network/tunnel URL (easy mobile phone scanning).",
     )
     parser.add_argument(
         "--pin",
@@ -79,6 +81,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Protect access with a custom password/passphrase.",
+    )
+    parser.add_argument(
+        "--tunnel",
+        nargs="?",
+        const="auto",
+        default=None,
+        help="Expose server over an encrypted public HTTPS tunnel (e.g. Cloudflare).",
+    )
+    parser.add_argument(
+        "--help-tunnel",
+        action="store_true",
+        help="Show comprehensive guide on tunneling, remote connections, and SSH port forwarding.",
     )
     parser.add_argument(
         "--host",
@@ -95,20 +109,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def get_mobile_url(port: int, auth_token: Optional[str] = None) -> str:
-    """Determine best URL for mobile access (Tailscale > LAN > Localhost)."""
-    tailscale_ip = get_tailscale_ip()
-    if tailscale_ip:
-        base = f"http://{tailscale_ip}:{port}"
+def get_mobile_url(
+    port: int,
+    auth_token: Optional[str] = None,
+    tunnel_url: Optional[str] = None,
+) -> str:
+    """Determine best URL for mobile access (Tunnel > Tailscale > LAN > Localhost)."""
+    if tunnel_url:
+        base = tunnel_url
     else:
-        lan_ip = get_local_ip()
-        if lan_ip and lan_ip != "127.0.0.1":
-            base = f"http://{lan_ip}:{port}"
+        tailscale_ip = get_tailscale_ip()
+        if tailscale_ip:
+            base = f"http://{tailscale_ip}:{port}"
         else:
-            base = f"http://localhost:{port}"
+            lan_ip = get_local_ip()
+            if lan_ip and lan_ip != "127.0.0.1":
+                base = f"http://{lan_ip}:{port}"
+            else:
+                base = f"http://localhost:{port}"
 
     if auth_token:
-        return f"{base}/?k={auth_token}"
+        sep = "&" if "?" in base else "/?"
+        return f"{base}{sep}k={auth_token}"
     return base
 
 
@@ -119,6 +141,7 @@ def print_banner(
     once: bool = False,
     show_qr: bool = False,
     auth_token: Optional[str] = None,
+    tunnel_url: Optional[str] = None,
 ):
     query_suffix = f"/?k={auth_token}" if auth_token else ""
     local_url = f"http://localhost:{port}{query_suffix}"
@@ -133,6 +156,10 @@ def print_banner(
         lines.append(f"Session:   {title}")
     if auth_token:
         lines.append(f"PIN / Key: {auth_token} 🔒")
+
+    if tunnel_url:
+        t_url = f"{tunnel_url}{query_suffix}"
+        lines.append(f"Tunnel:    {terminal_hyperlink(t_url)} 🌍")
 
     lines.append(f"Local:     {terminal_hyperlink(local_url)}")
     if lan_ip and lan_ip != "127.0.0.1":
@@ -152,7 +179,7 @@ def print_banner(
     print(f"└{border}┘", file=sys.stderr)
 
     if show_qr:
-        mobile_url = get_mobile_url(port, auth_token=auth_token)
+        mobile_url = get_mobile_url(port, auth_token=auth_token, tunnel_url=tunnel_url)
         qr_ascii = render_qr_terminal(mobile_url)
         print(f"\nScan with your phone to open ({mobile_url}):\n{qr_ascii}\n", file=sys.stderr)
     else:
@@ -165,14 +192,19 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
 
+    if args.help_tunnel:
+        print_tunnel_guide()
+        sys.exit(0)
+
     target_dir = args.dir.resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    # Determine auth token if requested
+    # Determine auth token
+    # If tunnel is active and user didn't specify credentials, auto-generate PIN for security
     auth_token = None
     if args.password:
         auth_token = args.password.strip()
-    elif args.pin:
+    elif args.pin or args.tunnel:
         auth_token = generate_pin()
 
     # Determine port
@@ -185,6 +217,20 @@ def main():
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
 
+    # Handle public tunnel
+    tunnel_url = None
+    tunnel_proc = None
+
+    if args.tunnel:
+        print(f"Starting public tunnel ({args.tunnel})...", file=sys.stderr)
+        try:
+            tunnel_url, tunnel_proc = start_tunnel(port, provider=args.tunnel)
+            atexit.register(stop_tunnel, tunnel_proc)
+        except Exception as e:
+            print(f"\n⚠️  Tunnel creation failed: {e}\n", file=sys.stderr)
+            print("Run 'clipto --help-tunnel' for setup instructions.", file=sys.stderr)
+            sys.exit(1)
+
     try:
         server = CliptoHTTPServer(
             (args.host, port),
@@ -193,8 +239,10 @@ def main():
             title=args.title,
             once=args.once,
             auth_token=auth_token,
+            tunnel_url=tunnel_url,
         )
     except OSError as e:
+        stop_tunnel(tunnel_proc)
         print(f"Error binding to port {port}: {e}", file=sys.stderr)
         sys.exit(1)
 
@@ -205,11 +253,13 @@ def main():
         once=args.once,
         show_qr=args.qr,
         auth_token=auth_token,
+        tunnel_url=tunnel_url,
     )
 
     if args.open:
+        target_open = tunnel_url or f"http://localhost:{port}"
         query_suffix = f"/?k={auth_token}" if auth_token else ""
-        webbrowser.open(f"http://localhost:{port}{query_suffix}")
+        webbrowser.open(f"{target_open}{query_suffix}")
 
     # Start server thread
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -222,11 +272,13 @@ def main():
             if args.timeout and (time.time() - start_time) > args.timeout:
                 print("\nOperation timed out.", file=sys.stderr)
                 server.shutdown()
+                stop_tunnel(tunnel_proc)
                 sys.exit(124)
             time.sleep(0.1)
 
         # Shutdown triggered (in once mode)
         server.shutdown()
+        stop_tunnel(tunnel_proc)
 
         # In once mode, output the uploaded file path(s) to stdout
         for file_path in server.uploaded_files:
@@ -235,6 +287,7 @@ def main():
     except KeyboardInterrupt:
         print("\nStopping Clipto server...", file=sys.stderr)
         server.shutdown()
+        stop_tunnel(tunnel_proc)
         sys.exit(0)
 
 

@@ -40,6 +40,7 @@ class CliptoHTTPServer(ThreadingHTTPServer):
         title: Optional[str] = None,
         once: bool = False,
         auth_token: Optional[str] = None,
+        tunnel_url: Optional[str] = None,
     ):
         super().__init__(server_address, RequestHandlerClass)
         self.upload_dir = Path(upload_dir).resolve()
@@ -47,25 +48,30 @@ class CliptoHTTPServer(ThreadingHTTPServer):
         self.title = title
         self.once = once
         self.auth_token = auth_token
+        self.tunnel_url = tunnel_url
         self.uploaded_files: List[Path] = []
         self.shutdown_event = threading.Event()
         self.failed_auth_attempts = collections.defaultdict(list)  # ip -> timestamps
         self.auth_lock = threading.Lock()
 
     def get_mobile_url(self) -> str:
-        port = self.server_port
-        tailscale_ip = get_tailscale_ip()
-        if tailscale_ip:
-            base = f"http://{tailscale_ip}:{port}"
+        if self.tunnel_url:
+            base = self.tunnel_url
         else:
-            lan_ip = get_local_ip()
-            if lan_ip and lan_ip != "127.0.0.1":
-                base = f"http://{lan_ip}:{port}"
+            port = self.server_port
+            tailscale_ip = get_tailscale_ip()
+            if tailscale_ip:
+                base = f"http://{tailscale_ip}:{port}"
             else:
-                base = f"http://localhost:{port}"
+                lan_ip = get_local_ip()
+                if lan_ip and lan_ip != "127.0.0.1":
+                    base = f"http://{lan_ip}:{port}"
+                else:
+                    base = f"http://localhost:{port}"
 
         if self.auth_token:
-            return f"{base}/?k={self.auth_token}"
+            sep = "&" if "?" in base else "/?"
+            return f"{base}{sep}k={self.auth_token}"
         return base
 
 
@@ -176,6 +182,7 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 "dir": str(self.server.upload_dir),
                 "title": self.server.title,
                 "once": self.server.once,
+                "tunnel_url": self.server.tunnel_url,
                 "mobile_url": self.server.get_mobile_url(),
                 "auth_required": bool(self.server.auth_token),
             })

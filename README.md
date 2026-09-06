@@ -16,8 +16,10 @@ Ever run an AI agent, Docker container, or SSH session on a remote server, but n
 
 - **⚡ Zero-Click Paste:** Open the page and press `Cmd+V` or `Ctrl+V` anywhere. No buttons or input selection required.
 - **🖼️ Thumbnail Grid & Lightbox:** Visual thumbnail cards with click-to-enlarge full-screen preview.
+- **🚇 Public HTTPS Tunnels (`--tunnel`):** Instant, secure internet access from cellular or remote servers via Cloudflare Quick Tunnels.
 - **📱 Phone QR Code (`--qr`):** Print a high-contrast terminal QR code or click "Phone QR" in the web UI to snap and upload from your phone camera.
-- **🔒 PIN & Password Protection (`--pin` / `--pass`):** Protect access with an auto-generated 4-digit PIN or custom passphrase.
+- **🔒 PIN & Password Protection (`--pin` / `--pass`):** Protect access with an auto-generated 4-digit PIN or custom passphrase (auto-enabled on `--tunnel`).
+- **📖 Built-in Guides (`--help-tunnel`):** Help modal right in the browser and CLI cheat sheets for remote connections.
 - **🎯 Drag & Drop:** Drop multiple files, images, or documents straight onto the window.
 - **📝 Text & Note Box:** Paste stack traces, error logs, or notes to save directly as `.txt` files.
 - **🤖 AI Agent Friendly (`--once`):** One-shot mode spins up the server, waits for an upload, writes the file, prints the saved path to `stdout`, and exits cleanly.
@@ -47,7 +49,7 @@ You'll see a clean terminal banner with the local and LAN URLs:
 
 ```text
 ┌─────────────────────────────────────────┐
-│  📎 Clipto v0.1.1                       │
+│  📎 Clipto v0.1.2                       │
 │  Saving to: /Users/matt/code/my-project │
 │  Local:     http://localhost:8765       │
 │  Network:   http://192.168.1.50:8765    │
@@ -60,45 +62,61 @@ You'll see a clean terminal banner with the local and LAN URLs:
 
 ---
 
+## 🚇 Remote Access & Public Tunneling
+
+When running on a cloud VM, Docker container, or uploading from your phone on cellular data:
+
+```bash
+clipto --tunnel
+```
+
+Clipto launches an encrypted, free public HTTPS tunnel via Cloudflare:
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  📎 Clipto v0.1.2                                                           │
+│  Saving to: /Users/matt/code/my-project                                     │
+│  PIN / Key: 8421 🔒                                                         │
+│  Tunnel:    https://gentle-winds-example.trycloudflare.com/?k=8421 🌍       │
+│  Local:     http://localhost:8765/?k=8421                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+* **Zero-Typing For You:** The tunnel link and QR code already contain your PIN token (`?k=PIN`), logging you in automatically.
+* **Locked For Everyone Else:** Anyone discovering your public tunnel URL hits a clean PIN lock screen.
+* **Want to learn more?** Run `clipto --help-tunnel` for a cheat sheet on tunnels and SSH port forwarding.
+
+---
+
 ## 📱 Mobile & Security Options
 
 ### Phone Upload with QR Code
 
 ```bash
 clipto --qr
+# or combined with tunnel:
+clipto --tunnel --qr
 ```
 
-A QR code is rendered directly in your terminal pointing to your LAN/Tailscale IP. Point your phone camera at your terminal to open the upload page instantly!
+A QR code is rendered directly in your terminal pointing to your reachable address. Point your phone camera at your terminal to open the upload page instantly!
 
 ### PIN & Password Protection
 
-To prevent unauthorized access across your local network or future tunnels:
-
 ```bash
-# Auto-generate a secure 4-digit PIN:
+# Auto-generate a 4-digit PIN:
 clipto --pin
 
-# Or use your own password:
-clipto --pass mysecret
+# Or use a custom password:
+clipto --pass secret123
 ```
-
-* **Zero friction for you:** The generated terminal hyperlink and QR code automatically include the auth key (`?k=PIN`), so clicking or scanning logs you in instantly with zero typing!
-* **Protected against outsiders:** Anyone opening the root link without the key must enter the PIN/password on a lock screen.
-* **Rate-limited:** Brute-force attempts are automatically blocked after 5 failed tries.
 
 ---
 
 ## 🤖 Using with AI Agents & Scripts
 
-Clipto is built from the ground up to integrate cleanly into automated agent workflows (Antigravity, Claude Code, Aider, OpenHands, etc.).
-
-### One-Shot Mode (`--once`)
-
-When run with `--once` (or `-1`), Clipto waits for a single upload batch, saves the file(s), prints the resolved absolute path to `stdout`, and shuts down:
-
 ```bash
 # Agent or script runs this:
-FILE_PATH=$(clipto --once --title "Submit login bug screenshot" --timeout 120)
+FILE_PATH=$(clipto --once --title "Submit bug screenshot" --timeout 120)
 
 echo "Agent received file at: $FILE_PATH"
 ```
@@ -110,7 +128,7 @@ The agent gets the exact file path back into its visual/multimodal context!
 ## ⚙️ CLI Reference
 
 ```text
-usage: clipto [-h] [-v] [-p PORT] [--no-hunt] [-d DIR] [-1] [-t TITLE] [-o] [-q] [--pin] [--pass PASSWORD] [--host HOST] [--timeout TIMEOUT]
+usage: clipto [-h] [-v] [-p PORT] [--no-hunt] [-d DIR] [-1] [-t TITLE] [-o] [-q] [--pin] [--pass PASSWORD] [--tunnel [TUNNEL]] [--help-tunnel] [--host HOST] [--timeout TIMEOUT]
 
 Instant clipboard, screenshot, and file bridge from browser to terminal.
 
@@ -124,9 +142,11 @@ options:
   -t TITLE, --title TITLE
                         Custom session title or prompt shown in the UI header.
   -o, --open            Automatically open web UI in default browser on launch.
-  -q, --qr              Display a terminal QR code for the network URL.
+  -q, --qr              Display a terminal QR code for the network/tunnel URL.
   --pin                 Protect access with an auto-generated 4-digit PIN.
   --pass PASSWORD       Protect access with a custom password.
+  --tunnel [TUNNEL]     Expose server over an encrypted public HTTPS tunnel.
+  --help-tunnel         Show guide on tunneling and remote connections.
   --host HOST           Host to bind to (default: 0.0.0.0).
   --timeout TIMEOUT     Timeout in seconds (useful with --once).
 ```

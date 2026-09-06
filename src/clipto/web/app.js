@@ -510,3 +510,44 @@
 
   init();
 })();
+
+  // Help Modal logic
+  const btnHelpGuide = document.getElementById('btn-help-guide');
+  const helpModal = document.getElementById('help-modal');
+  const helpModalClose = document.getElementById('help-modal-close');
+  const helpModalBackdrop = helpModal.querySelector('.modal-backdrop');
+  const helpTabBtns = helpModal.querySelectorAll('.help-tab-btn');
+  const helpTabPanels = helpModal.querySelectorAll('.help-tab-panel');
+
+  function openHelpModal() {
+    helpModal.classList.add('active');
+  }
+
+  function closeHelpModal() {
+    helpModal.classList.remove('active');
+  }
+
+  btnHelpGuide.addEventListener('click', openHelpModal);
+  helpModalClose.addEventListener('click', closeHelpModal);
+  helpModalBackdrop.addEventListener('click', closeHelpModal);
+
+  helpTabBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tabId = btn.getAttribute('data-tab');
+      helpTabBtns.forEach((b) => b.classList.remove('active'));
+      helpTabPanels.forEach((p) => p.classList.remove('active'));
+
+      btn.classList.add('active');
+      const targetPanel = document.getElementById(tabId);
+      if (targetPanel) targetPanel.classList.add('active');
+    });
+  });
+
+  // Escape key handler enhancement
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (helpModal.classList.contains('active')) closeHelpModal();
+      if (qrModal.classList.contains('active')) closeQrModal();
+      if (lightbox.classList.contains('active')) closeLightbox();
+    }
+  });

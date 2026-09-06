@@ -242,3 +242,19 @@ if __name__ == "__main__":
             pin_server.shutdown()
             pin_server.server_close()
             shutil.rmtree(pin_dir, ignore_errors=True)
+
+    def test_tunnel_helpers(self):
+        from clipto.tunnel import is_cloudflared_available, print_tunnel_guide
+
+        # Should be a boolean
+        self.assertIsInstance(is_cloudflared_available(), bool)
+
+        # print_tunnel_guide should execute without error
+        old_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+        try:
+            print_tunnel_guide()
+            output = sys.stderr.getvalue()
+            self.assertIn("Clipto Remote Access", output)
+        finally:
+            sys.stderr = old_stderr
