@@ -190,4 +190,4 @@ options:
 
 ## 📄 License
 
-MIT © Matt
+MIT © MattInTech
