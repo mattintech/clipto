@@ -20,6 +20,8 @@ def is_tailscale_available() -> bool:
 def start_cloudflare_tunnel(port: int, timeout: float = 12.0) -> Tuple[str, subprocess.Popen]:
     """
     Start a Cloudflare Quick Tunnel using cloudflared.
+    Passes --config /dev/null to ensure pre-existing named tunnel configurations
+    in ~/.cloudflared/config.yml do not intercept or block quick tunnel traffic.
     Returns (public_https_url, process).
     """
     if not is_cloudflared_available():
@@ -32,7 +34,14 @@ def start_cloudflare_tunnel(port: int, timeout: float = 12.0) -> Tuple[str, subp
             "For more details, run: clipto --help-tunnel"
         )
 
-    cmd = ["cloudflared", "tunnel", "--url", f"http://127.0.0.1:{port}"]
+    cmd = [
+        "cloudflared",
+        "tunnel",
+        "--config",
+        "/dev/null",
+        "--url",
+        f"http://127.0.0.1:{port}",
+    ]
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,

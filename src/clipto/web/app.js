@@ -22,6 +22,14 @@
   const qrUrlDisplay = document.getElementById('qr-url-display');
   const btnCopyUrl = document.getElementById('btn-copy-url');
 
+  // Help Modal elements
+  const btnHelpGuide = document.getElementById('btn-help-guide');
+  const helpModal = document.getElementById('help-modal');
+  const helpModalClose = document.getElementById('help-modal-close');
+  const helpModalBackdrop = helpModal.querySelector('.modal-backdrop');
+  const helpTabBtns = helpModal.querySelectorAll('.help-tab-btn');
+  const helpTabPanels = helpModal.querySelectorAll('.help-tab-panel');
+
   // Lightbox elements
   const lightbox = document.getElementById('lightbox');
   const lightboxImg = document.getElementById('lightbox-img');
@@ -34,7 +42,6 @@
   const lockCard = lockScreen.querySelector('.lock-card');
   const authForm = document.getElementById('auth-form');
   const authInput = document.getElementById('auth-input');
-  const btnUnlock = document.getElementById('btn-unlock');
   const authError = document.getElementById('auth-error');
 
   let uploadedItems = [];
@@ -120,14 +127,41 @@
       await navigator.clipboard.writeText(currentMobileUrl);
       btnCopyUrl.textContent = 'Copied!';
       setTimeout(() => btnCopyUrl.textContent = 'Copy', 2000);
-      showToast('Network URL copied to clipboard');
+      showToast('URL copied to clipboard');
     } catch (err) {
       showToast('Could not copy to clipboard', 'error');
     }
   });
 
+  // Help Modal functions
+  function openHelpModal() {
+    helpModal.classList.add('active');
+  }
+
+  function closeHelpModal() {
+    helpModal.classList.remove('active');
+  }
+
+  btnHelpGuide.addEventListener('click', openHelpModal);
+  helpModalClose.addEventListener('click', closeHelpModal);
+  helpModalBackdrop.addEventListener('click', closeHelpModal);
+
+  helpTabBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tabId = btn.getAttribute('data-tab');
+      helpTabBtns.forEach((b) => b.classList.remove('active'));
+      helpTabPanels.forEach((p) => p.classList.remove('active'));
+
+      btn.classList.add('active');
+      const targetPanel = document.getElementById(tabId);
+      if (targetPanel) targetPanel.classList.add('active');
+    });
+  });
+
+  // Global Escape key handler
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+      if (helpModal.classList.contains('active')) closeHelpModal();
       if (qrModal.classList.contains('active')) closeQrModal();
       if (lightbox.classList.contains('active')) closeLightbox();
     }
@@ -510,44 +544,3 @@
 
   init();
 })();
-
-  // Help Modal logic
-  const btnHelpGuide = document.getElementById('btn-help-guide');
-  const helpModal = document.getElementById('help-modal');
-  const helpModalClose = document.getElementById('help-modal-close');
-  const helpModalBackdrop = helpModal.querySelector('.modal-backdrop');
-  const helpTabBtns = helpModal.querySelectorAll('.help-tab-btn');
-  const helpTabPanels = helpModal.querySelectorAll('.help-tab-panel');
-
-  function openHelpModal() {
-    helpModal.classList.add('active');
-  }
-
-  function closeHelpModal() {
-    helpModal.classList.remove('active');
-  }
-
-  btnHelpGuide.addEventListener('click', openHelpModal);
-  helpModalClose.addEventListener('click', closeHelpModal);
-  helpModalBackdrop.addEventListener('click', closeHelpModal);
-
-  helpTabBtns.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const tabId = btn.getAttribute('data-tab');
-      helpTabBtns.forEach((b) => b.classList.remove('active'));
-      helpTabPanels.forEach((p) => p.classList.remove('active'));
-
-      btn.classList.add('active');
-      const targetPanel = document.getElementById(tabId);
-      if (targetPanel) targetPanel.classList.add('active');
-    });
-  });
-
-  // Escape key handler enhancement
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      if (helpModal.classList.contains('active')) closeHelpModal();
-      if (qrModal.classList.contains('active')) closeQrModal();
-      if (lightbox.classList.contains('active')) closeLightbox();
-    }
-  });
