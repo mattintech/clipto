@@ -65,72 +65,190 @@
       </div>
     </header>
 
-    <!-- Main Dropzone / Paste Area -->
+    <!-- Segmented Navigation Tabs -->
+    <nav class="nav-tabs" role="tablist">
+      <button id="tab-btn-dropzone" class="nav-tab active" data-tab="dropzone" role="tab" aria-selected="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+        <span>Upload & Paste</span>
+      </button>
+      <button id="tab-btn-files" class="nav-tab" data-tab="files" role="tab" aria-selected="false">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+          <polyline points="10 9 9 9 8 9"></polyline>
+        </svg>
+        <span>Files & Gists</span>
+        <span id="files-badge-count" class="tab-badge">0</span>
+      </button>
+    </nav>
+
+    <!-- Main Content Panels -->
     <main class="main-content">
-      <div id="dropzone" class="dropzone">
-        <div class="dropzone-content">
-          <div class="paste-icon-wrap">
-            <svg class="paste-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+      <!-- Panel 1: Dropzone & Paste -->
+      <div id="panel-dropzone" class="tab-panel active">
+        <div id="dropzone" class="dropzone">
+          <div class="dropzone-content">
+            <div class="paste-icon-wrap">
+              <svg class="paste-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </div>
+
+            <h2 class="dropzone-title">
+              Press <kbd class="kbd">Cmd</kbd> + <kbd class="kbd">V</kbd> anywhere to paste
+            </h2>
+            <p class="dropzone-subtitle">or drag and drop screenshots, images, logs, or files here</p>
+
+            <div class="actions">
+              <label class="btn btn-primary" for="file-input">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                Browse Files
+              </label>
+              <input type="file" id="file-input" multiple style="display: none;">
+            </div>
+          </div>
+
+          <div class="drop-overlay">
+            <div class="drop-overlay-content">
+              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+              <h3>Drop to Upload</h3>
+            </div>
+          </div>
+        </div>
+
+        <!-- Optional Note / Text Area -->
+        <div class="note-section card">
+          <div class="note-header">
+            <div class="note-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+              <span>Send Text / Note / Stack Trace</span>
+            </div>
+            <button id="btn-send-note" class="btn btn-secondary btn-sm" disabled>Send Text</button>
+          </div>
+          <textarea id="note-input" class="note-input" placeholder="Paste or type text, error logs, or notes to save into the directory..."></textarea>
+        </div>
+
+        <!-- Recent Uploads / Session History -->
+        <div class="uploads-section card">
+          <div class="uploads-header">
+            <div class="uploads-header-left">
+              <h3>Recent Uploads</h3>
+              <span id="upload-count" class="badge">0 items</span>
+            </div>
+            <div class="view-toggles">
+              <button id="btn-view-list" class="view-toggle-btn" title="List View">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+              </button>
+              <button id="btn-view-grid" class="view-toggle-btn active" title="Thumbnail Grid View">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+              </button>
+            </div>
+          </div>
+          <div id="uploads-list" class="uploads-list grid-view">
+            <div class="empty-state">No files uploaded yet in this session.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Panel 2: Files & Gists -->
+      <div id="panel-files" class="tab-panel">
+        <div class="files-controls card">
+          <div class="search-box">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
             </svg>
+            <input type="text" id="file-search-input" class="search-input" placeholder="Search files by name or extension...">
           </div>
-
-          <h2 class="dropzone-title">
-            Press <kbd class="kbd">Cmd</kbd> + <kbd class="kbd">V</kbd> anywhere to paste
-          </h2>
-          <p class="dropzone-subtitle">or drag and drop screenshots, images, logs, or files here</p>
-
-          <div class="actions">
-            <label class="btn btn-primary" for="file-input">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-              Browse Files
-            </label>
-            <input type="file" id="file-input" multiple style="display: none;">
-          </div>
-        </div>
-
-        <div class="drop-overlay">
-          <div class="drop-overlay-content">
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-            <h3>Drop to Upload</h3>
-          </div>
-        </div>
-      </div>
-
-      <!-- Optional Note / Text Area -->
-      <div class="note-section card">
-        <div class="note-header">
-          <div class="note-title">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-            <span>Send Text / Note / Stack Trace</span>
-          </div>
-          <button id="btn-send-note" class="btn btn-secondary btn-sm" disabled>Send Text</button>
-        </div>
-        <textarea id="note-input" class="note-input" placeholder="Paste or type text, error logs, or notes to save into the directory..."></textarea>
-      </div>
-
-      <!-- Recent Uploads / Session History -->
-      <div class="uploads-section card">
-        <div class="uploads-header">
-          <div class="uploads-header-left">
-            <h3>Recent Uploads</h3>
-            <span id="upload-count" class="badge">0 items</span>
-          </div>
-          <div class="view-toggles">
-            <button id="btn-view-list" class="view-toggle-btn" title="List View">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
-            </button>
-            <button id="btn-view-grid" class="view-toggle-btn active" title="Thumbnail Grid View">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          <div class="files-meta">
+            <span id="files-filter-status" class="badge"></span>
+            <button id="btn-refresh-files" class="btn btn-secondary btn-sm" title="Refresh files list">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <polyline points="1 20 1 14 7 14"></polyline>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+              </svg>
+              <span>Refresh</span>
             </button>
           </div>
         </div>
-        <div id="uploads-list" class="uploads-list grid-view">
-          <div class="empty-state">No files uploaded yet in this session.</div>
+
+        <div class="files-container card">
+          <div class="files-table-wrapper">
+            <table class="files-table">
+              <thead>
+                <tr>
+                  <th class="th-name">File</th>
+                  <th class="th-size">Size</th>
+                  <th class="th-time">Modified</th>
+                  <th class="th-actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="files-list-body">
+                <tr><td colspan="4" class="empty-state">Loading files...</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </main>
+
+    <!-- Gist Code Viewer Modal -->
+    <div id="gist-modal" class="modal">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content gist-modal-content card">
+        <div class="gist-modal-header">
+          <div class="gist-modal-title-wrap">
+            <div class="gist-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="16 18 22 12 16 6"></polyline>
+                <polyline points="8 6 2 12 8 18"></polyline>
+              </svg>
+            </div>
+            <h3 id="gist-filename">filename.txt</h3>
+            <span id="gist-meta-badge" class="badge"></span>
+          </div>
+          <div class="gist-modal-actions">
+            <button id="btn-gist-copy-raw" class="btn btn-secondary btn-sm" title="Copy raw content">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+              <span>Copy Raw</span>
+            </button>
+            <a id="btn-gist-download" class="btn btn-secondary btn-sm" download title="Download file">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span>Download</span>
+            </a>
+            <button id="btn-gist-copy-curl" class="btn btn-secondary btn-sm" title="Copy curl command">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="4 17 10 11 4 5"></polyline>
+                <line x1="12" y1="19" x2="20" y2="19"></line>
+              </svg>
+              <span>curl</span>
+            </button>
+            <button id="gist-modal-close" class="modal-close" title="Close (Esc)">✕</button>
+          </div>
+        </div>
+        <div class="gist-body">
+          <div id="gist-code-container" class="gist-code-container">
+            <pre id="gist-line-numbers" class="gist-line-numbers"></pre>
+            <pre id="gist-code-content" class="gist-code-content"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- Phone QR Modal -->
     <div id="qr-modal" class="modal">

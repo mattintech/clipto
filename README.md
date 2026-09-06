@@ -19,6 +19,8 @@ Ever run an AI agent, Docker container, or SSH session on a remote server, but n
 ## ✨ Features
 
 - **⚡ Zero-Click Paste:** Open the page and press `Cmd+V` or `Ctrl+V` anywhere. No buttons or input selection required.
+- **📄 Private Gists & File Sharing (`clipto share [path]`):** Instant private gist viewer and outbound file bridge. Browse directory files, preview code with line numbers, or stream binaries.
+- **⚡ 1-Click `curl` Copy:** Copy direct `curl` commands from the terminal banner or web UI to pipe files directly to remote servers or terminal sessions.
 - **🖼️ Thumbnail Grid & Lightbox:** Visual thumbnail cards with click-to-enlarge full-screen preview.
 - **🚇 Public HTTPS Tunnels (`--tunnel`):** Instant, secure internet access from cellular or remote servers via Cloudflare Quick Tunnels.
 - **📱 Phone QR Code (`--qr`):** Print a high-contrast terminal QR code or click "Phone QR" in the web UI to snap and upload from your phone camera.
@@ -27,7 +29,7 @@ Ever run an AI agent, Docker container, or SSH session on a remote server, but n
 - **📖 Built-in Guides (`--help-tunnel`):** Help modal right in the browser and CLI cheat sheets for remote connections.
 - **🎯 Drag & Drop:** Drop multiple files, images, or documents straight onto the window.
 - **📝 Text & Note Box:** Paste stack traces, error logs, or notes to save directly as `.txt` files.
-- **🤖 AI Agent Friendly (`--once`):** One-shot mode spins up the server, waits for an upload, writes the file, prints the saved path to `stdout`, and exits cleanly.
+- **🤖 AI Agent Friendly (`--once`):** One-shot mode spins up the server, waits for an upload or file delivery, writes/streams the file, and exits cleanly.
 - **🔀 Smart Port Hunting:** Automatically picks the next free port (`8765`, `8766`, etc.) so multiple instances never collide.
 - **🏷️ Multi-Instance Context:** The UI prominently shows the host machine, target directory, and optional custom `--title`.
 - **🪶 Zero Dependencies:** Powered purely by Python's standard library. Installs in milliseconds with zero dependency conflicts.
@@ -63,6 +65,54 @@ clipto --tunnel --totp --qr
 1. Open the URL in your browser (or scan the terminal QR code with your phone).
 2. Hit `Cmd+V` to paste a screenshot, or drag files onto the page.
 3. The files are instantly written to your current directory!
+
+---
+
+## 📂 Private Gists & File Sharing
+
+Clipto isn't just an inbound receiver—it's also an instant outbound file server and private Gist bridge!
+
+### 1. Share a Specific File or Binary
+
+```bash
+# Share a script as a private Gist:
+clipto share deploy.sh
+
+# Or share a compiled binary / archive:
+clipto share release-v1.0.tar.gz
+
+# Shortcut syntax:
+clipto my_script.py
+```
+
+Clipto formats a direct `curl` command right in the terminal banner:
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│ 📎 Clipto v0.1.3 [SHARING FILE]                                        │
+│ File:       deploy.sh (3.2 KB)                                         │
+│ Directory:  /Users/matt/code/project                                   │
+│ Local:      http://localhost:8765                                      │
+│ Network:    http://192.168.1.100:8765                                  │
+│ Curl (CLI): curl -sSL "http://localhost:8765/raw/deploy.sh" -o deploy.sh│
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+On any remote machine or terminal session, simply paste that `curl` command to download the file directly!
+
+### 2. One-Shot Delivery (`--once`)
+
+Combine `share` with `--once` to serve the file exactly once and terminate immediately upon delivery:
+
+```bash
+clipto share app-binary --once
+```
+
+### 3. In-Browser Gist Viewer & Directory Browser
+
+Run `clipto share` (or `clipto share /path/to/folder`) and click the **Files & Gists** tab:
+* **Interactive Code Viewer:** Click any text or script file to view formatted code with line numbers, 1-click "Copy Raw", and direct download.
+* **Instant Search Filter:** Real-time search by filename or extension.
+* **1-Click curl Command:** Copy CLI download commands directly from each row in the browser.
 
 ---
 

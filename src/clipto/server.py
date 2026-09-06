@@ -4,7 +4,9 @@ import http.cookies
 import json
 import mimetypes
 import secrets
+import shutil
 import socket
+import sys
 import threading
 import time
 import urllib.parse
@@ -33,6 +35,33 @@ def get_web_dir() -> Path:
         return Path(__file__).parent / "web"
 
 
+TEXT_EXTENSIONS = {
+    ".txt", ".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".htm", ".css", ".scss",
+    ".json", ".yaml", ".yml", ".md", ".sh", ".bash", ".zsh", ".c", ".cpp", ".h",
+    ".hpp", ".rs", ".go", ".java", ".rb", ".php", ".sql", ".xml", ".csv", ".tsv",
+    ".log", ".conf", ".ini", ".toml", ".dockerfile", ".r", ".swift", ".kt", ".lua",
+    ".env.example", ".lock"
+}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"}
+
+def is_text_file(path: Path) -> bool:
+    name_lower = path.name.lower()
+    suffix_lower = path.suffix.lower()
+    if suffix_lower in TEXT_EXTENSIONS or name_lower in {"dockerfile", "makefile", "license", "gemfile", "pipfile"}:
+        return True
+    if suffix_lower in IMAGE_EXTENSIONS:
+        return False
+    try:
+        with open(path, "rb") as f:
+            chunk = f.read(512)
+            if b"\x00" in chunk:
+                return False
+            chunk.decode("utf-8")
+            return True
+    except Exception:
+        return False
+
+
 class CliptoHTTPServer(ThreadingHTTPServer):
     def __init__(
         self,
@@ -44,6 +73,8 @@ class CliptoHTTPServer(ThreadingHTTPServer):
         auth_token: Optional[str] = None,
         totp_secret: Optional[str] = None,
         tunnel_url: Optional[str] = None,
+        share_mode: bool = False,
+        share_file: Optional[Path] = None,
     ):
         super().__init__(server_address, RequestHandlerClass)
         self.upload_dir = Path(upload_dir).resolve()
@@ -53,6 +84,8 @@ class CliptoHTTPServer(ThreadingHTTPServer):
         self.auth_token = auth_token
         self.totp_secret = totp_secret
         self.tunnel_url = tunnel_url
+        self.share_mode = share_mode
+        self.share_file = Path(share_file).resolve() if share_file else None
         self.uploaded_files: List[Path] = []
         self.shutdown_event = threading.Event()
         self.failed_auth_attempts = collections.defaultdict(list)
@@ -208,6 +241,8 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 "mobile_url": self.server.get_mobile_url(),
                 "auth_required": bool(self.server.auth_token or self.server.totp_secret),
                 "auth_type": auth_type,
+                "share_mode": self.server.share_mode,
+                "share_file": self.server.share_file.name if self.server.share_file else None,
             })
         elif path == "/api/qr":
             mobile_url = self.server.get_mobile_url()
@@ -218,6 +253,128 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif path == "/api/files":
+            files_list = []
+            if self.server.share_file and self.server.share_file.is_file():
+                f = self.server.share_file
+                stat = f.stat()
+                files_list.append({
+                    "name": f.name,
+                    "size": stat.st_size,
+                    "mtime": stat.st_mtime,
+                    "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(stat.st_mtime)),
+                    "is_text": is_text_file(f),
+                    "is_image": f.suffix.lower() in IMAGE_EXTENSIONS,
+                    "extension": f.suffix.lower().lstrip("."),
+                    "raw_url": f"/raw/{urllib.parse.quote(f.name)}",
+                })
+            else:
+                try:
+                    for entry in sorted(self.server.upload_dir.iterdir(), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True):
+                        if entry.name.startswith("."):
+                            continue
+                        if entry.is_file():
+                            stat = entry.stat()
+                            files_list.append({
+                                "name": entry.name,
+                                "size": stat.st_size,
+                                "mtime": stat.st_mtime,
+                                "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(stat.st_mtime)),
+                                "is_text": is_text_file(entry),
+                                "is_image": entry.suffix.lower() in IMAGE_EXTENSIONS,
+                                "extension": entry.suffix.lower().lstrip("."),
+                                "raw_url": f"/raw/{urllib.parse.quote(entry.name)}",
+                            })
+                except Exception as e:
+                    self.send_json(500, {"error": f"Failed to list directory: {e}"})
+                    return
+
+            self.send_json(200, {
+                "files": files_list,
+                "count": len(files_list),
+                "share_mode": self.server.share_mode,
+            })
+        elif path == "/api/content":
+            query = urllib.parse.parse_qs(parsed_url.query)
+            filename = query.get("name", [None])[0]
+            if not filename:
+                self.send_error(400, "Missing file name")
+                return
+
+            safe_name = sanitize_filename(filename)
+            target = (self.server.upload_dir / safe_name).resolve()
+
+            try:
+                target.relative_to(self.server.upload_dir)
+            except ValueError:
+                self.send_error(403, "Forbidden")
+                return
+
+            if not target.is_file():
+                self.send_error(404, "File Not Found")
+                return
+
+            stat = target.stat()
+            if stat.st_size > 2 * 1024 * 1024:
+                self.send_json(400, {"error": "File exceeds 2MB preview limit. Please download directly."})
+                return
+
+            try:
+                text_content = target.read_text(encoding="utf-8", errors="replace")
+                lines_count = len(text_content.splitlines())
+                self.send_json(200, {
+                    "name": target.name,
+                    "size": stat.st_size,
+                    "lines": lines_count,
+                    "content": text_content,
+                    "raw_url": f"/raw/{urllib.parse.quote(target.name)}",
+                })
+            except Exception as e:
+                self.send_json(500, {"error": f"Failed to read file: {e}"})
+        elif path.startswith("/raw/") or path == "/raw":
+            query = urllib.parse.parse_qs(parsed_url.query)
+            if path.startswith("/raw/"):
+                raw_target_name = urllib.parse.unquote(path[5:].strip())
+            else:
+                raw_target_name = query.get("name", [None])[0]
+
+            if not raw_target_name and self.server.share_file:
+                raw_target_name = self.server.share_file.name
+
+            if not raw_target_name:
+                self.send_error(400, "Missing file name for raw download")
+                return
+
+            safe_name = sanitize_filename(raw_target_name)
+            target = (self.server.upload_dir / safe_name).resolve()
+
+            try:
+                target.relative_to(self.server.upload_dir)
+            except ValueError:
+                self.send_error(403, "Forbidden")
+                return
+
+            if not target.is_file():
+                self.send_error(404, "File Not Found")
+                return
+
+            stat = target.stat()
+            is_text = is_text_file(target)
+            content_type = "text/plain; charset=utf-8" if is_text else (mimetypes.guess_type(str(target))[0] or "application/octet-stream")
+
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(stat.st_size))
+            disposition = "inline" if is_text else f'attachment; filename="{target.name}"'
+            self.send_header("Content-Disposition", disposition)
+            self.end_headers()
+
+            with open(target, "rb") as f:
+                shutil.copyfileobj(f, self.wfile)
+
+            if self.server.once and self.server.share_mode:
+                print(f"\n✓ Delivered {target.name} to {self.client_address[0]} (one-shot transfer complete).", file=sys.stderr)
+                self.server.shutdown_event.set()
         elif path == "/api/file":
             query = urllib.parse.parse_qs(parsed_url.query)
             filename = query.get("name", [None])[0]

@@ -121,6 +121,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Timeout in seconds (useful with --once to prevent hanging indefinitely).",
     )
+    parser.add_argument(
+        "share_args",
+        nargs="*",
+        default=[],
+        help="Optional: 'share [path]' or path to share a specific file, binary, or directory.",
+    )
     return parser
 
 
@@ -149,6 +155,15 @@ def get_mobile_url(
     return base
 
 
+def format_file_size(size_bytes: int) -> str:
+    size = float(size_bytes)
+    for unit in ["B", "KB", "MB", "GB"]:
+        if size < 1024.0:
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} B"
+        size /= 1024.0
+    return f"{size:.1f} TB"
+
+
 def print_banner(
     port: int,
     target_dir: Path,
@@ -158,6 +173,8 @@ def print_banner(
     auth_token: Optional[str] = None,
     totp_secret: Optional[str] = None,
     tunnel_url: Optional[str] = None,
+    share_mode: bool = False,
+    share_file: Optional[Path] = None,
 ):
     current_key = None
     if totp_secret:
@@ -170,10 +187,27 @@ def print_banner(
     lan_ip = get_local_ip()
     tailscale_ip = get_tailscale_ip()
 
+    mode_tag = ""
+    if share_file:
+        mode_tag = " [SHARING FILE]"
+    elif share_mode:
+        mode_tag = " [SHARING DIRECTORY]"
+    elif once:
+        mode_tag = " [ONE-SHOT MODE]"
+
     lines = [
-        f"📎 Clipto v{__version__}" + (" [ONE-SHOT MODE]" if once else ""),
-        f"Saving to:  {target_dir.resolve()}",
+        f"📎 Clipto v{__version__}{mode_tag}",
     ]
+    if share_file:
+        try:
+            sz = format_file_size(share_file.stat().st_size)
+        except Exception:
+            sz = ""
+        lines.append(f"File:       {share_file.name} ({sz})")
+        lines.append(f"Directory:  {target_dir.resolve()}")
+    else:
+        lines.append(f"Directory:  {target_dir.resolve()}")
+
     if title:
         lines.append(f"Session:    {title}")
     if totp_secret:
@@ -193,6 +227,12 @@ def print_banner(
         tail_url = f"http://{tailscale_ip}:{port}{query_suffix}"
         lines.append(f"Tailscale:  {terminal_hyperlink(tail_url)}")
 
+    if share_file:
+        base_dl = tunnel_url or (f"http://{lan_ip}:{port}" if lan_ip and lan_ip != "127.0.0.1" else f"http://localhost:{port}")
+        token_dl = f"?k={current_key}" if current_key else ""
+        curl_cmd = f'curl -sSL "{base_dl}/raw/{urllib.parse.quote(share_file.name)}{token_dl}" -o {share_file.name}'
+        lines.append(f"Curl (CLI): {curl_cmd}")
+
     max_w = max(visible_width(line) for line in lines)
     border = "─" * (max_w + 4)
 
@@ -209,7 +249,10 @@ def print_banner(
     else:
         print("", file=sys.stderr)
 
-    print("Press Cmd+V or drag files into the browser tab. Press Ctrl+C to stop.\n", file=sys.stderr)
+    if share_file:
+        print("Share link ready. File can be viewed, downloaded, or curled directly.\n", file=sys.stderr)
+    else:
+        print("Press Cmd+V or drag files into the browser tab. Press Ctrl+C to stop.\n", file=sys.stderr)
 
 
 def main():
@@ -224,7 +267,40 @@ def main():
         print_tunnel_guide()
         sys.exit(0)
 
-    target_dir = args.dir.resolve()
+    share_mode = False
+    share_file = None
+
+    if args.share_args:
+        first = args.share_args[0]
+        if first == "share":
+            share_mode = True
+            if len(args.share_args) > 1:
+                p = Path(args.share_args[1]).expanduser().resolve()
+                if p.is_file():
+                    share_file = p
+                    target_dir = p.parent
+                elif p.is_dir():
+                    target_dir = p
+                else:
+                    print(f"Error: Path '{args.share_args[1]}' not found.", file=sys.stderr)
+                    sys.exit(1)
+            else:
+                target_dir = args.dir.resolve()
+        else:
+            p = Path(first).expanduser().resolve()
+            if p.is_file():
+                share_mode = True
+                share_file = p
+                target_dir = p.parent
+            elif p.is_dir():
+                share_mode = True
+                target_dir = p
+            else:
+                print(f"Error: Unrecognized command or path '{first}'.", file=sys.stderr)
+                sys.exit(1)
+    else:
+        target_dir = args.dir.resolve()
+
     target_dir.mkdir(parents=True, exist_ok=True)
 
     # Determine security credentials
@@ -281,6 +357,8 @@ def main():
             auth_token=auth_token,
             totp_secret=totp_secret,
             tunnel_url=tunnel_url,
+            share_mode=share_mode,
+            share_file=share_file,
         )
     except OSError as e:
         stop_tunnel(tunnel_proc)
@@ -296,13 +374,20 @@ def main():
         auth_token=auth_token,
         totp_secret=totp_secret,
         tunnel_url=tunnel_url,
+        share_mode=share_mode,
+        share_file=share_file,
     )
 
     if args.open:
         active_key = server.get_current_auth_key()
         target_open = tunnel_url or f"http://localhost:{port}"
         query_suffix = f"/?k={active_key}" if active_key else ""
-        webbrowser.open(f"{target_open}{query_suffix}")
+        hash_suffix = ""
+        if share_file:
+            hash_suffix = f"#gist={urllib.parse.quote(share_file.name)}"
+        elif share_mode:
+            hash_suffix = "#files"
+        webbrowser.open(f"{target_open}{query_suffix}{hash_suffix}")
 
     # Start server thread
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)

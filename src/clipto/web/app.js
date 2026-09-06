@@ -14,6 +14,31 @@
   const btnViewList = document.getElementById('btn-view-list');
   const btnViewGrid = document.getElementById('btn-view-grid');
 
+  // Nav Tabs elements
+  const tabBtnDropzone = document.getElementById('tab-btn-dropzone');
+  const tabBtnFiles = document.getElementById('tab-btn-files');
+  const panelDropzone = document.getElementById('panel-dropzone');
+  const panelFiles = document.getElementById('panel-files');
+  const filesBadgeCount = document.getElementById('files-badge-count');
+
+  // Files & Gists Panel elements
+  const fileSearchInput = document.getElementById('file-search-input');
+  const filesFilterStatus = document.getElementById('files-filter-status');
+  const btnRefreshFiles = document.getElementById('btn-refresh-files');
+  const filesListBody = document.getElementById('files-list-body');
+
+  // Gist Modal elements
+  const gistModal = document.getElementById('gist-modal');
+  const gistModalClose = document.getElementById('gist-modal-close');
+  const gistModalBackdrop = gistModal.querySelector('.modal-backdrop');
+  const gistFilename = document.getElementById('gist-filename');
+  const gistMetaBadge = document.getElementById('gist-meta-badge');
+  const btnGistCopyRaw = document.getElementById('btn-gist-copy-raw');
+  const btnGistDownload = document.getElementById('btn-gist-download');
+  const btnGistCopyCurl = document.getElementById('btn-gist-copy-curl');
+  const gistLineNumbers = document.getElementById('gist-line-numbers');
+  const gistCodeContent = document.getElementById('gist-code-content');
+
   // Phone QR Modal elements
   const btnPhoneQr = document.getElementById('btn-phone-qr');
   const qrModal = document.getElementById('qr-modal');
@@ -45,8 +70,11 @@
   const authError = document.getElementById('auth-error');
 
   let uploadedItems = [];
+  let allFiles = [];
   let isOnceMode = false;
   let currentMobileUrl = '';
+  let currentRawGistText = '';
+  let currentGistFilename = '';
   let currentViewMode = localStorage.getItem('clipto_view_mode') || 'grid';
 
   // Sound chime via Web Audio API (zero external assets)
@@ -161,6 +189,7 @@
   // Global Escape key handler
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+      if (gistModal.classList.contains('active')) closeGistModal();
       if (helpModal.classList.contains('active')) closeHelpModal();
       if (qrModal.classList.contains('active')) closeQrModal();
       if (lightbox.classList.contains('active')) closeLightbox();
@@ -274,6 +303,253 @@
   btnViewList.addEventListener('click', () => setViewMode('list'));
   btnViewGrid.addEventListener('click', () => setViewMode('grid'));
 
+  // Tab navigation handler
+  function switchTab(tabName, updateHash = false) {
+    if (tabName === 'files') {
+      tabBtnFiles.classList.add('active');
+      tabBtnFiles.setAttribute('aria-selected', 'true');
+      tabBtnDropzone.classList.remove('active');
+      tabBtnDropzone.setAttribute('aria-selected', 'false');
+
+      panelFiles.classList.add('active');
+      panelDropzone.classList.remove('active');
+
+      if (allFiles.length === 0) {
+        loadFiles();
+      }
+    } else {
+      tabBtnDropzone.classList.add('active');
+      tabBtnDropzone.setAttribute('aria-selected', 'true');
+      tabBtnFiles.classList.remove('active');
+      tabBtnFiles.setAttribute('aria-selected', 'false');
+
+      panelDropzone.classList.add('active');
+      panelFiles.classList.remove('active');
+    }
+
+    if (updateHash) {
+      if (tabName === 'files' && window.location.hash !== '#files') {
+        window.history.replaceState(null, '', '#files');
+      } else if (tabName === 'dropzone' && window.location.hash !== '#dropzone') {
+        window.history.replaceState(null, '', '#dropzone');
+      }
+    }
+  }
+
+  tabBtnDropzone.addEventListener('click', () => switchTab('dropzone', true));
+  tabBtnFiles.addEventListener('click', () => switchTab('files', true));
+
+  // File type icon helper (Material flat SVG)
+  function getFileIconSvg(file) {
+    if (file.is_image) {
+      return `<svg class="file-icon image" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>`;
+    }
+    const ext = (file.extension || '').toLowerCase();
+    const archiveExts = ['zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar'];
+    if (archiveExts.includes(ext)) {
+      return `<svg class="file-icon archive" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8"></path><path d="M1 3h22v5H1z"></path><line x1="10" y1="12" x2="14" y2="12"></line></svg>`;
+    }
+    if (file.is_text) {
+      return `<svg class="file-icon code" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`;
+    }
+    return `<svg class="file-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
+  }
+
+  // Load directory files from backend
+  async function loadFiles() {
+    try {
+      filesListBody.innerHTML = '<tr><td colspan="4" class="empty-state">Loading files...</td></tr>';
+      const res = await fetch('/api/files');
+      if (res.status === 401) {
+        lockScreen.classList.remove('hidden');
+        authInput.focus();
+        return;
+      }
+      if (!res.ok) throw new Error('Failed to load files');
+      const data = await res.json();
+      allFiles = data.files || [];
+      filesBadgeCount.textContent = data.count !== undefined ? data.count : allFiles.length;
+      renderFiles();
+    } catch (err) {
+      filesListBody.innerHTML = `<tr><td colspan="4" class="empty-state" style="color: var(--danger)">Error loading files: ${err.message}</td></tr>`;
+    }
+  }
+
+  // Render directory files table
+  function renderFiles() {
+    const query = fileSearchInput.value.trim().toLowerCase();
+    const filtered = allFiles.filter((f) => {
+      if (!query) return true;
+      return f.name.toLowerCase().includes(query) || (f.extension && f.extension.toLowerCase().includes(query));
+    });
+
+    if (query) {
+      filesFilterStatus.textContent = `${filtered.length} of ${allFiles.length}`;
+      filesFilterStatus.classList.remove('hidden');
+    } else {
+      filesFilterStatus.textContent = `${allFiles.length} file${allFiles.length === 1 ? '' : 's'}`;
+    }
+
+    if (filtered.length === 0) {
+      filesListBody.innerHTML = `<tr><td colspan="4" class="empty-state">${query ? 'No matching files found.' : 'No files in this directory.'}</td></tr>`;
+      return;
+    }
+
+    filesListBody.innerHTML = '';
+    filtered.forEach((file) => {
+      const tr = document.createElement('tr');
+
+      let actionsHtml = '';
+      if (file.is_text) {
+        actionsHtml += `
+          <button class="btn-action btn-gist" data-action="gist" title="View formatted Gist">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+            <span>View Gist</span>
+          </button>
+        `;
+      }
+      actionsHtml += `
+        <a href="${file.raw_url}" download="${file.name}" class="btn-action" title="Download raw file">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          <span>Download</span>
+        </a>
+        <button class="btn-action" data-action="curl" title="Copy CLI curl command">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+          <span>curl</span>
+        </button>
+      `;
+
+      tr.innerHTML = `
+        <td>
+          <div class="file-cell">
+            ${getFileIconSvg(file)}
+            <a href="javascript:void(0)" class="file-name-link">${file.name}</a>
+          </div>
+        </td>
+        <td class="td-size">${formatSize(file.size)}</td>
+        <td class="td-time">${file.time || '-'}</td>
+        <td>
+          <div class="file-actions">
+            ${actionsHtml}
+          </div>
+        </td>
+      `;
+
+      const nameLink = tr.querySelector('.file-name-link');
+      if (file.is_text) {
+        nameLink.addEventListener('click', () => openGist(file.name));
+      } else if (file.is_image) {
+        nameLink.addEventListener('click', () => openLightbox(file.raw_url, file.name));
+      } else {
+        nameLink.href = file.raw_url;
+        nameLink.setAttribute('download', file.name);
+      }
+
+      const btnGist = tr.querySelector('[data-action="gist"]');
+      if (btnGist) {
+        btnGist.addEventListener('click', () => openGist(file.name));
+      }
+
+      const btnCurl = tr.querySelector('[data-action="curl"]');
+      if (btnCurl) {
+        btnCurl.addEventListener('click', () => copyCurlForFile(file.raw_url, file.name));
+      }
+
+      filesListBody.appendChild(tr);
+    });
+  }
+
+  // Copy curl helper
+  function copyCurlForFile(rawUrl, filename) {
+    const origin = window.location.origin;
+    const curlCmd = `curl -sSL "${origin}${rawUrl}" -o ${filename}`;
+    navigator.clipboard.writeText(curlCmd).then(() => {
+      showToast(`Copied curl command for ${filename}`);
+    }).catch(() => {
+      showToast('Failed to copy curl command', 'error');
+    });
+  }
+
+  fileSearchInput.addEventListener('input', renderFiles);
+  btnRefreshFiles.addEventListener('click', () => {
+    loadFiles();
+    showToast('Files refreshed');
+  });
+
+  // Gist Modal functions
+  async function openGist(filename) {
+    gistModal.classList.add('active');
+    gistFilename.textContent = filename;
+    gistMetaBadge.textContent = 'Loading...';
+    gistLineNumbers.textContent = '';
+    gistCodeContent.textContent = 'Fetching file content...';
+    currentRawGistText = '';
+    currentGistFilename = filename;
+
+    // Update URL hash without reload
+    window.history.replaceState(null, '', `#gist=${encodeURIComponent(filename)}`);
+
+    try {
+      const res = await fetch(`/api/content?name=${encodeURIComponent(filename)}`);
+      if (res.status === 401) {
+        lockScreen.classList.remove('hidden');
+        authInput.focus();
+        closeGistModal();
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to load file');
+      }
+
+      const data = await res.json();
+      currentRawGistText = data.content;
+      currentGistFilename = data.name;
+      gistMetaBadge.textContent = `${data.lines} line${data.lines === 1 ? '' : 's'} • ${formatSize(data.size)}`;
+      btnGistDownload.href = data.raw_url;
+      btnGistDownload.setAttribute('download', data.name);
+
+      const lines = data.content.split('\n');
+      const lineNums = Array.from({ length: lines.length }, (_, i) => i + 1).join('\n');
+      gistLineNumbers.textContent = lineNums;
+      gistCodeContent.textContent = data.content;
+    } catch (err) {
+      gistMetaBadge.textContent = 'Error';
+      gistLineNumbers.textContent = '!';
+      gistCodeContent.textContent = `Could not preview file: ${err.message}`;
+      showToast(err.message, 'error');
+    }
+  }
+
+  function closeGistModal() {
+    gistModal.classList.remove('active');
+    if (window.location.hash.startsWith('#gist=')) {
+      window.history.replaceState(null, '', '#files');
+    }
+  }
+
+  gistModalClose.addEventListener('click', closeGistModal);
+  gistModalBackdrop.addEventListener('click', closeGistModal);
+
+  btnGistCopyRaw.addEventListener('click', async () => {
+    if (!currentRawGistText) return;
+    try {
+      await navigator.clipboard.writeText(currentRawGistText);
+      const span = btnGistCopyRaw.querySelector('span');
+      const orig = span ? span.textContent : 'Copy Raw';
+      if (span) span.textContent = 'Copied!';
+      setTimeout(() => { if (span) span.textContent = orig; }, 2000);
+      showToast(`Copied ${currentGistFilename} to clipboard`);
+    } catch (err) {
+      showToast('Failed to copy to clipboard', 'error');
+    }
+  });
+
+  btnGistCopyCurl.addEventListener('click', () => {
+    if (!currentGistFilename) return;
+    copyCurlForFile(`/raw/${encodeURIComponent(currentGistFilename)}`, currentGistFilename);
+  });
+
   // Configure lock screen text & input mode based on auth type
   function setLockScreenMode(authType) {
     const titleEl = lockScreen.querySelector('h2');
@@ -372,6 +648,18 @@
         connectionStatus.className = 'status-pill once-mode';
         connectionStatus.querySelector('.status-text').textContent = 'One-Shot';
       }
+
+      if (data.share_file) {
+        if (!window.location.hash.startsWith('#gist=') && window.location.hash !== '#dropzone') {
+          switchTab('files');
+          openGist(data.share_file);
+        }
+      } else if (data.share_mode) {
+        if (window.location.hash !== '#dropzone') {
+          switchTab('files');
+        }
+      }
+      loadFiles();
     } catch (err) {
       connectionStatus.className = 'status-pill';
       connectionStatus.querySelector('.status-text').textContent = 'Offline';
@@ -414,6 +702,7 @@
           showToast(`Saved ${file.name}`);
         });
         renderUploads();
+        loadFiles();
       }
 
       if (isOnceMode) {
@@ -538,6 +827,24 @@
     btnSendNote.disabled = true;
   });
 
+  // Hash routing helper
+  function handleRoute(hash) {
+    if (!hash) return;
+    if (hash === '#help') {
+      openHelpModal();
+    } else if (hash === '#qr') {
+      openQrModal();
+    } else if (hash === '#files') {
+      switchTab('files');
+    } else if (hash === '#dropzone') {
+      switchTab('dropzone');
+    } else if (hash.startsWith('#gist=')) {
+      const filename = decodeURIComponent(hash.substring(6));
+      switchTab('files');
+      openGist(filename);
+    }
+  }
+
   // Initialization & Auto-Auth Check
   async function init() {
     setViewMode(currentViewMode);
@@ -552,8 +859,7 @@
         // Clean URL so the key doesn't sit in the address bar
         const cleanUrl = window.location.pathname;
         window.history.replaceState(null, '', cleanUrl);
-        if (window.location.hash === '#help') openHelpModal();
-        else if (window.location.hash === '#qr') openQrModal();
+        handleRoute(window.location.hash);
       }
     } else {
       // Check auth status
@@ -566,21 +872,18 @@
           lockScreen.classList.remove('hidden');
           authInput.focus();
         } else {
-          loadInfo();
-          if (window.location.hash === '#help') openHelpModal();
-          else if (window.location.hash === '#qr') openQrModal();
+          await loadInfo();
+          handleRoute(window.location.hash);
         }
       } catch (err) {
-        loadInfo();
-        if (window.location.hash === '#help') openHelpModal();
-        else if (window.location.hash === '#qr') openQrModal();
+        await loadInfo();
+        handleRoute(window.location.hash);
       }
     }
 
     // Support hashchange dynamically
     window.addEventListener('hashchange', () => {
-      if (window.location.hash === '#help') openHelpModal();
-      else if (window.location.hash === '#qr') openQrModal();
+      handleRoute(window.location.hash);
     });
   }
 

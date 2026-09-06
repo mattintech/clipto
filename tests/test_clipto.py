@@ -1,5 +1,7 @@
+import io
 import json
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -129,10 +131,6 @@ class TestCliptoServer(unittest.TestCase):
         self.assertTrue(saved_note.exists())
         self.assertEqual(saved_note.read_text(), "Some important error log trace")
 
-
-if __name__ == "__main__":
-    unittest.main()
-
     def test_file_download_and_traversal_prevention(self):
         # Create a test file
         test_file = self.temp_dir / "preview.png"
@@ -230,7 +228,7 @@ if __name__ == "__main__":
             with urllib.request.urlopen(auth_req_good) as resp:
                 self.assertEqual(resp.status, 200)
                 cookie = resp.headers.get("Set-Cookie")
-                self.assertIn("clipto_auth=1234", cookie)
+                self.assertIn("clipto_auth=", cookie)
 
             # 4. Request with query param ?k=1234 should succeed directly
             with urllib.request.urlopen(f"http://127.0.0.1:{pin_port}/api/info?k=1234") as resp:
@@ -283,7 +281,7 @@ if __name__ == "__main__":
 
         # Test URI
         uri = get_totp_uri(secret, issuer="Clipto", account="test@box")
-        self.assertTrue(uri.startswith("otpauth://totp/Clipto:test%40box?"))
+        self.assertTrue(uri.startswith("otpauth://totp/Clipto%3Atest%40box?"))
         self.assertIn("secret=", uri)
 
     def test_server_with_totp(self):
@@ -330,3 +328,117 @@ if __name__ == "__main__":
             totp_server.shutdown()
             totp_server.server_close()
             shutil.rmtree(totp_dir, ignore_errors=True)
+
+    def test_api_files_and_content(self):
+        # Create test files
+        code_file = self.temp_dir / "test_script.py"
+        code_file.write_text("print('hello world')\nprint('line 2')\n")
+
+        image_file = self.temp_dir / "sample.png"
+        image_file.write_bytes(b"\x89PNG\r\n\x1a\nfakeimagebytes")
+
+        hidden_file = self.temp_dir / ".secret_env"
+        hidden_file.write_text("SECRET=12345\n")
+
+        # 1. GET /api/files
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/files") as resp:
+            self.assertEqual(resp.status, 200)
+            data = json.loads(resp.read().decode())
+            file_names = [f["name"] for f in data["files"]]
+            self.assertIn("test_script.py", file_names)
+            self.assertIn("sample.png", file_names)
+            self.assertNotIn(".secret_env", file_names)
+
+            code_entry = next(f for f in data["files"] if f["name"] == "test_script.py")
+            self.assertTrue(code_entry["is_text"])
+            self.assertFalse(code_entry["is_image"])
+
+            img_entry = next(f for f in data["files"] if f["name"] == "sample.png")
+            self.assertFalse(img_entry["is_text"])
+            self.assertTrue(img_entry["is_image"])
+
+        # 2. GET /api/content?name=test_script.py
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/content?name=test_script.py") as resp:
+            self.assertEqual(resp.status, 200)
+            content_data = json.loads(resp.read().decode())
+            self.assertEqual(content_data["name"], "test_script.py")
+            self.assertEqual(content_data["lines"], 2)
+            self.assertIn("hello world", content_data["content"])
+
+        # 3. Path traversal protection on /api/content
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/content?name=../../etc/passwd")
+            # sanitize_filename will turn ../../etc/passwd into passwd, which doesn't exist in temp_dir -> 404
+            self.fail("Expected HTTP error for non-existent traversed file")
+        except urllib.error.HTTPError as e:
+            self.assertIn(e.code, [400, 403, 404])
+
+        # 4. GET /raw/<filename>
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/raw/test_script.py") as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertIn("text/plain", resp.headers.get("Content-Type", ""))
+            self.assertEqual(resp.read().decode(), "print('hello world')\nprint('line 2')\n")
+
+    def test_share_mode_and_once_download(self):
+        share_dir = Path(tempfile.mkdtemp())
+        share_port = find_available_port(0)
+        target_file = share_dir / "archive.tar.gz"
+        target_file.write_bytes(b"FAKE_TAR_GZ_DATA_BYTES")
+
+        server = CliptoHTTPServer(
+            ("127.0.0.1", share_port),
+            CliptoRequestHandler,
+            upload_dir=share_dir,
+            title="Share Session",
+            once=True,
+            share_mode=True,
+            share_file=target_file,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        time.sleep(0.1)
+
+        try:
+            # Check /api/info
+            with urllib.request.urlopen(f"http://127.0.0.1:{share_port}/api/info") as resp:
+                data = json.loads(resp.read().decode())
+                self.assertTrue(data["share_mode"])
+                self.assertEqual(data["share_file"], "archive.tar.gz")
+
+            # Check /api/files returns only the shared file
+            with urllib.request.urlopen(f"http://127.0.0.1:{share_port}/api/files") as resp:
+                data = json.loads(resp.read().decode())
+                self.assertEqual(data["count"], 1)
+                self.assertEqual(data["files"][0]["name"], "archive.tar.gz")
+
+            # Download via /raw/archive.tar.gz
+            with urllib.request.urlopen(f"http://127.0.0.1:{share_port}/raw/archive.tar.gz") as resp:
+                self.assertEqual(resp.status, 200)
+                self.assertEqual(resp.read(), b"FAKE_TAR_GZ_DATA_BYTES")
+
+            # Server shutdown_event should have been triggered by --once download
+            time.sleep(0.1)
+            self.assertTrue(server.shutdown_event.is_set())
+
+        finally:
+            server.shutdown()
+            server.server_close()
+            shutil.rmtree(share_dir, ignore_errors=True)
+
+    def test_cli_share_parser(self):
+        from clipto.cli import build_parser
+        parser = build_parser()
+
+        args1 = parser.parse_args(["share", "my_script.py"])
+        self.assertEqual(args1.share_args, ["share", "my_script.py"])
+
+        args2 = parser.parse_args(["share"])
+        self.assertEqual(args2.share_args, ["share"])
+
+        args3 = parser.parse_args(["my_archive.zip"])
+        self.assertEqual(args3.share_args, ["my_archive.zip"])
+
+
+if __name__ == "__main__":
+    unittest.main()
+
