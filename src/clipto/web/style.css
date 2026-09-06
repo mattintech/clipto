@@ -1616,6 +1616,69 @@ body {
 /* Files Grid styling */
 .files-grid {
   padding: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 14px;
+}
+
+.grid-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.grid-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.grid-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-card-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-decoration: none;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.btn-card-action:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-main);
+  border-color: #64748b;
+  transform: translateY(-1px);
+}
+
+.btn-card-action.btn-card-gist {
+  color: #a5b4fc;
+}
+
+.btn-card-action.btn-card-gist:hover {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.btn-card-action[data-action="curl"]:hover {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: var(--success);
+  color: #6ee7b7;
 }
 
 .file-thumb-preview {

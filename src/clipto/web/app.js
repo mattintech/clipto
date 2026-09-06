@@ -782,27 +782,41 @@
         card.innerHTML = `
           ${mediaHtml}
           <div class="grid-card-body">
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px;">
+            <div class="grid-card-header">
               <span class="grid-card-name" title="${file.name}">${file.name}</span>
               ${gistBadge}
             </div>
-            <div class="grid-card-meta">
-              <span>${formatSize(file.size)}</span>
-              <span>${file.time || '-'}</span>
-            </div>
-            <div class="file-actions" style="margin-top: 6px; justify-content: flex-start; gap: 4px;">
-              ${(file.is_gist || file.is_text) ? `<button class="btn-action btn-gist" data-action="gist" title="View / Edit"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg><span>Code</span></button>` : ''}
-              <a href="${file.raw_url}" download="${file.name}" class="btn-action" title="Download">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                <span>DL</span>
-              </a>
-              <button class="btn-action" data-action="curl" title="Copy CLI curl command">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
-                <span>curl</span>
-              </button>
+            <div class="grid-card-footer">
+              <div class="grid-card-meta">
+                <span>${formatSize(file.size)}</span>
+              </div>
+              <div class="grid-card-actions">
+                ${(file.is_gist || file.is_text) ? `
+                  <button class="btn-card-action btn-card-gist" data-action="gist" title="View / Edit in Gist viewer">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+                  </button>
+                ` : ''}
+                <a href="${file.raw_url}" download="${file.name}" class="btn-card-action" title="Download ${file.name}">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                </a>
+                <button class="btn-card-action" data-action="curl" title="Copy CLI curl command">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+                </button>
+              </div>
             </div>
           </div>
         `;
+
+        const nameEl = card.querySelector('.grid-card-name');
+        if (nameEl) {
+          if (file.is_image) {
+            nameEl.style.cursor = 'pointer';
+            nameEl.addEventListener('click', () => openLightbox(file.raw_url, file.name));
+          } else if (file.is_text || file.is_gist) {
+            nameEl.style.cursor = 'pointer';
+            nameEl.addEventListener('click', () => openGist(file.name, true));
+          }
+        }
 
         if (file.is_image) {
           card.querySelector('.grid-card-media').addEventListener('click', () => {
