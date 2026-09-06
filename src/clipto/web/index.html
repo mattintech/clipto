@@ -23,6 +23,10 @@
 
       <div class="context-badges">
         <div id="session-title" class="badge title-badge hidden"></div>
+        <button id="btn-phone-qr" class="badge qr-badge" title="Show Phone QR Code">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          <span>Phone QR</span>
+        </button>
         <div class="badge host-badge" title="Host Machine">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
           <span id="hostname-display">Connecting...</span>
@@ -91,19 +95,38 @@
             <span id="upload-count" class="badge">0 items</span>
           </div>
           <div class="view-toggles">
-            <button id="btn-view-list" class="view-toggle-btn active" title="List View">
+            <button id="btn-view-list" class="view-toggle-btn" title="List View">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
             </button>
-            <button id="btn-view-grid" class="view-toggle-btn" title="Thumbnail Grid View">
+            <button id="btn-view-grid" class="view-toggle-btn active" title="Thumbnail Grid View">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
             </button>
           </div>
         </div>
-        <div id="uploads-list" class="uploads-list list-view">
+        <div id="uploads-list" class="uploads-list grid-view">
           <div class="empty-state">No files uploaded yet in this session.</div>
         </div>
       </div>
     </main>
+
+    <!-- Phone QR Modal -->
+    <div id="qr-modal" class="modal">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content card">
+        <button id="qr-modal-close" class="modal-close" title="Close (Esc)">✕</button>
+        <div class="modal-header">
+          <h3>📱 Upload from Phone</h3>
+          <p class="modal-subtitle">Scan this QR code with your phone camera to open Clipto on your Wi-Fi/network:</p>
+        </div>
+        <div id="qr-svg-container" class="qr-svg-container">
+          <img id="qr-img" src="/api/qr" alt="QR Code" width="220" height="220">
+        </div>
+        <div class="qr-url-box">
+          <code id="qr-url-display">http://...</code>
+          <button id="btn-copy-url" class="btn btn-secondary btn-sm">Copy</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Image Lightbox Modal -->
     <div id="lightbox" class="lightbox">

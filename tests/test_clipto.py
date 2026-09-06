@@ -163,3 +163,22 @@ if __name__ == "__main__":
         emoji_str = "📎 Clipto v0.1.0"
         # Emoji 📎 has width 2
         self.assertEqual(visible_width(emoji_str), 16)
+
+    def test_qr_generation(self):
+        from clipto.utils import render_qr_svg, render_qr_terminal
+
+        url = "http://192.168.1.100:8765"
+        qr_terminal = render_qr_terminal(url)
+        self.assertTrue(len(qr_terminal) > 0)
+        self.assertIn("\033[47", qr_terminal)
+
+        qr_svg = render_qr_svg(url)
+        self.assertTrue(qr_svg.startswith("<svg"))
+        self.assertIn("</svg>", qr_svg)
+
+    def test_api_qr_endpoint(self):
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/qr") as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(resp.headers.get("Content-Type"), "image/svg+xml; charset=utf-8")
+            content = resp.read().decode("utf-8")
+            self.assertTrue(content.startswith("<svg"))

@@ -9,7 +9,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import List, Optional
 
-from clipto.utils import get_unique_path, sanitize_filename
+from clipto.utils import (
+    get_local_ip,
+    get_tailscale_ip,
+    get_unique_path,
+    render_qr_svg,
+    sanitize_filename,
+)
 
 
 def get_web_dir() -> Path:
@@ -37,6 +43,16 @@ class CliptoHTTPServer(ThreadingHTTPServer):
         self.once = once
         self.uploaded_files: List[Path] = []
         self.shutdown_event = threading.Event()
+
+    def get_mobile_url(self) -> str:
+        port = self.server_port
+        tailscale_ip = get_tailscale_ip()
+        if tailscale_ip:
+            return f"http://{tailscale_ip}:{port}"
+        lan_ip = get_local_ip()
+        if lan_ip and lan_ip != "127.0.0.1":
+            return f"http://{lan_ip}:{port}"
+        return f"http://localhost:{port}"
 
 
 class CliptoRequestHandler(BaseHTTPRequestHandler):
@@ -90,7 +106,17 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 "dir": str(self.server.upload_dir),
                 "title": self.server.title,
                 "once": self.server.once,
+                "mobile_url": self.server.get_mobile_url(),
             })
+        elif path == "/api/qr":
+            mobile_url = self.server.get_mobile_url()
+            svg = render_qr_svg(mobile_url)
+            body = svg.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif path == "/api/file":
             query = urllib.parse.parse_qs(parsed_url.query)
             filename = query.get("name", [None])[0]

@@ -384,3 +384,73 @@
   setViewMode(currentViewMode);
   loadInfo();
 })();
+
+  // Phone QR Modal logic
+  const btnPhoneQr = document.getElementById('btn-phone-qr');
+  const qrModal = document.getElementById('qr-modal');
+  const qrModalClose = document.getElementById('qr-modal-close');
+  const qrModalBackdrop = qrModal.querySelector('.modal-backdrop');
+  const qrUrlDisplay = document.getElementById('qr-url-display');
+  const btnCopyUrl = document.getElementById('btn-copy-url');
+
+  let currentMobileUrl = '';
+
+  function openQrModal() {
+    qrModal.classList.add('active');
+  }
+
+  function closeQrModal() {
+    qrModal.classList.remove('active');
+  }
+
+  btnPhoneQr.addEventListener('click', openQrModal);
+  qrModalClose.addEventListener('click', closeQrModal);
+  qrModalBackdrop.addEventListener('click', closeQrModal);
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (qrModal.classList.contains('active')) closeQrModal();
+      if (lightbox.classList.contains('active')) closeLightbox();
+    }
+  });
+
+  btnCopyUrl.addEventListener('click', async () => {
+    if (!currentMobileUrl) return;
+    try {
+      await navigator.clipboard.writeText(currentMobileUrl);
+      btnCopyUrl.textContent = 'Copied!';
+      setTimeout(() => btnCopyUrl.textContent = 'Copy', 2000);
+      showToast('Network URL copied to clipboard');
+    } catch (err) {
+      showToast('Could not copy to clipboard', 'error');
+    }
+  });
+
+  // Enhance loadInfo to store mobile_url
+  const origLoadInfo = loadInfo;
+  loadInfo = async function() {
+    try {
+      const res = await fetch('/api/info');
+      if (!res.ok) throw new Error('Failed to fetch info');
+      const data = await res.json();
+
+      hostnameDisplay.textContent = data.hostname || 'localhost';
+      dirDisplay.textContent = data.dir || '.';
+      isOnceMode = !!data.once;
+      currentMobileUrl = data.mobile_url || window.location.href;
+      qrUrlDisplay.textContent = currentMobileUrl;
+
+      if (data.title) {
+        sessionTitle.textContent = data.title;
+        sessionTitle.classList.remove('hidden');
+      }
+
+      if (isOnceMode) {
+        connectionStatus.className = 'status-pill once-mode';
+        connectionStatus.querySelector('.status-text').textContent = 'One-Shot';
+      }
+    } catch (err) {
+      connectionStatus.className = 'status-pill';
+      connectionStatus.querySelector('.status-text').textContent = 'Offline';
+    }
+  };

@@ -13,6 +13,7 @@ from clipto.utils import (
     find_available_port,
     get_local_ip,
     get_tailscale_ip,
+    render_qr_terminal,
     terminal_hyperlink,
     visible_width,
 )
@@ -62,6 +63,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Automatically open the web UI in the default browser on launch.",
     )
     parser.add_argument(
+        "-q", "--qr",
+        action="store_true",
+        help="Display a terminal QR code for the network URL (easy mobile phone scanning).",
+    )
+    parser.add_argument(
         "--host",
         type=str,
         default="0.0.0.0",
@@ -76,11 +82,23 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def get_mobile_url(port: int) -> str:
+    """Determine best URL for mobile access (Tailscale > LAN > Localhost)."""
+    tailscale_ip = get_tailscale_ip()
+    if tailscale_ip:
+        return f"http://{tailscale_ip}:{port}"
+    lan_ip = get_local_ip()
+    if lan_ip and lan_ip != "127.0.0.1":
+        return f"http://{lan_ip}:{port}"
+    return f"http://localhost:{port}"
+
+
 def print_banner(
     port: int,
     target_dir: Path,
     title: Optional[str] = None,
     once: bool = False,
+    show_qr: bool = False,
 ):
     local_url = f"http://localhost:{port}"
     lan_ip = get_local_ip()
@@ -106,7 +124,15 @@ def print_banner(
     for line in lines:
         padding = " " * (max_w - visible_width(line))
         print(f"│  {line}{padding}  │", file=sys.stderr)
-    print(f"└{border}┘\n", file=sys.stderr)
+    print(f"└{border}┘", file=sys.stderr)
+
+    if show_qr:
+        mobile_url = get_mobile_url(port)
+        qr_ascii = render_qr_terminal(mobile_url)
+        print(f"\nScan with your phone to open ({mobile_url}):\n{qr_ascii}\n", file=sys.stderr)
+    else:
+        print("", file=sys.stderr)
+
     print("Press Cmd+V or drag files into the browser tab. Press Ctrl+C to stop.\n", file=sys.stderr)
 
 
@@ -139,7 +165,7 @@ def main():
         print(f"Error binding to port {port}: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print_banner(port, target_dir, title=args.title, once=args.once)
+    print_banner(port, target_dir, title=args.title, once=args.once, show_qr=args.qr)
 
     if args.open:
         webbrowser.open(f"http://localhost:{port}")
