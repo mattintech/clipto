@@ -459,6 +459,51 @@ class TestCliptoServer(unittest.TestCase):
         finally:
             sys.stderr = old_stderr
 
+    def test_gist_creation_and_listing(self):
+        # 1. Existing text file in directory should NOT be a gist
+        normal_file = self.temp_dir / "regular_file.py"
+        normal_file.write_text("print('not a gist')")
+
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/files") as resp:
+            data = json.loads(resp.read().decode())
+            file_entry = next(f for f in data["files"] if f["name"] == "regular_file.py")
+            self.assertTrue(file_entry["is_text"])
+            self.assertFalse(file_entry["is_gist"])
+            self.assertEqual(data["gists"], [])
+
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/gists") as resp:
+            gists_data = json.loads(resp.read().decode())
+            self.assertEqual(gists_data["count"], 0)
+
+        # 2. Create a Gist via /api/gist
+        gist_payload = json.dumps({"filename": "my_gist.py", "content": "print('hello gist')\n"}).encode("utf-8")
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/gist",
+            data=gist_payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req) as resp:
+            self.assertEqual(resp.status, 200)
+            res = json.loads(resp.read().decode())
+            self.assertEqual(res["status"], "ok")
+            self.assertEqual(res["name"], "my_gist.py")
+            self.assertEqual(res["lines"], 1)
+
+        # 3. Verify /api/gists and /api/files now reflect the created gist
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/gists") as resp:
+            gists_data = json.loads(resp.read().decode())
+            self.assertEqual(gists_data["count"], 1)
+            self.assertEqual(gists_data["gists"][0]["name"], "my_gist.py")
+            self.assertTrue(gists_data["gists"][0]["is_gist"])
+
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/files") as resp:
+            data = json.loads(resp.read().decode())
+            gist_entry = next(f for f in data["files"] if f["name"] == "my_gist.py")
+            reg_entry = next(f for f in data["files"] if f["name"] == "regular_file.py")
+            self.assertTrue(gist_entry["is_gist"])
+            self.assertFalse(reg_entry["is_gist"])
+
 
 if __name__ == "__main__":
     unittest.main()

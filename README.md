@@ -240,4 +240,4 @@ options:
 
 ## 📄 License
 
-MIT © MattInTech
+MIT © Matt Hills (MattInTech)

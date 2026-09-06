@@ -339,14 +339,10 @@
     } else if (tabName === 'gist') {
       if (allFiles.length === 0) {
         loadFiles().then(() => {
-          if (!currentGistFilename && allFiles.length > 0) {
-            const firstText = allFiles.find((f) => f.is_text);
-            if (firstText) openGist(firstText.name, false);
-          }
+          syncGistTabState();
         });
-      } else if (!currentGistFilename) {
-        const firstText = allFiles.find((f) => f.is_text);
-        if (firstText) openGist(firstText.name, false);
+      } else {
+        syncGistTabState();
       }
     }
 
@@ -358,6 +354,21 @@
         const hash = `#${tabName}`;
         if (window.location.hash !== hash) window.history.replaceState(null, '', hash);
       }
+    }
+  }
+
+  function syncGistTabState() {
+    // If user is actively in create mode, keep create mode
+    if (!gistCreateWrapper.classList.contains('hidden')) {
+      return;
+    }
+    const gistFiles = allFiles.filter((f) => f.is_gist);
+    if (gistFiles.length === 0) {
+      setGistMode('create');
+    } else if (currentGistFilename && gistFiles.some((f) => f.name === currentGistFilename)) {
+      gistFileSelect.value = currentGistFilename;
+    } else {
+      openGist(gistFiles[0].name, false);
     }
   }
 
@@ -397,17 +408,17 @@
       filesBadgeCount.textContent = data.count !== undefined ? data.count : allFiles.length;
       renderFiles();
 
-      // Populate Gist dropdown with text files
-      const textFiles = allFiles.filter((f) => f.is_text);
-      if (textFiles.length > 0) {
-        gistFileSelect.innerHTML = textFiles
+      // Populate Gist dropdown ONLY with gists
+      const gistFiles = allFiles.filter((f) => f.is_gist);
+      if (gistFiles.length > 0) {
+        gistFileSelect.innerHTML = gistFiles
           .map((f) => `<option value="${f.name}">${f.name}</option>`)
           .join('');
-        if (currentGistFilename && textFiles.some((f) => f.name === currentGistFilename)) {
+        if (currentGistFilename && gistFiles.some((f) => f.name === currentGistFilename)) {
           gistFileSelect.value = currentGistFilename;
         }
       } else {
-        gistFileSelect.innerHTML = '<option value="">No text files in directory</option>';
+        gistFileSelect.innerHTML = '<option value="">No gists created yet</option>';
       }
     } catch (err) {
       filesListBody.innerHTML = `<tr><td colspan="4" class="empty-state" style="color: var(--danger)">Error loading files: ${err.message}</td></tr>`;
@@ -439,9 +450,9 @@
       const tr = document.createElement('tr');
 
       let actionsHtml = '';
-      if (file.is_text) {
+      if (file.is_gist) {
         actionsHtml += `
-          <button class="btn-action btn-gist" data-action="gist" title="View formatted Gist">
+          <button class="btn-action btn-gist" data-action="gist" title="View Gist">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
             <span>View Gist</span>
           </button>
@@ -458,11 +469,14 @@
         </button>
       `;
 
+      const gistTag = file.is_gist ? '<span class="badge" style="margin-left: 6px; font-size: 11px;">Gist</span>' : '';
+
       tr.innerHTML = `
         <td>
           <div class="file-cell">
             ${getFileIconSvg(file)}
             <a href="javascript:void(0)" class="file-name-link">${file.name}</a>
+            ${gistTag}
           </div>
         </td>
         <td class="td-size">${formatSize(file.size)}</td>
@@ -475,7 +489,7 @@
       `;
 
       const nameLink = tr.querySelector('.file-name-link');
-      if (file.is_text) {
+      if (file.is_gist) {
         nameLink.addEventListener('click', () => openGist(file.name, true));
       } else if (file.is_image) {
         nameLink.addEventListener('click', () => openLightbox(file.raw_url, file.name));
@@ -545,10 +559,18 @@
   btnGistNew.addEventListener('click', () => {
     switchTab('gist', false);
     setGistMode('create');
+    window.history.replaceState(null, '', '#gist-new');
   });
 
   btnGistCancel.addEventListener('click', () => {
-    setGistMode('view');
+    const gistFiles = allFiles.filter((f) => f.is_gist);
+    if (gistFiles.length > 0) {
+      setGistMode('view');
+      const hash = currentGistFilename ? `#gist=${encodeURIComponent(currentGistFilename)}` : '#gist';
+      window.history.replaceState(null, '', hash);
+    } else {
+      switchTab('dropzone', true);
+    }
   });
 
   // Paste from clipboard button
@@ -586,15 +608,12 @@
       filename = `gist_${dateStr}_${timeStr}.txt`;
     }
 
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    const formData = new FormData();
-    formData.append('files', blob, filename);
-
     try {
       showToast('Saving gist...', 'info');
-      const res = await fetch('/api/upload', {
+      const res = await fetch('/api/gist', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename, content }),
       });
 
       if (res.status === 401) {
@@ -604,13 +623,13 @@
       }
 
       if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(errorText || 'Failed to save gist');
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to save gist');
       }
 
       const result = await res.json();
       playSuccessChime();
-      showToast(`Gist saved: ${filename}`);
+      showToast(`Gist saved: ${result.name}`);
 
       // Clear editor
       gistNewContent.value = '';
@@ -619,7 +638,7 @@
       // Reload files list and open newly created gist
       await loadFiles();
       setGistMode('view');
-      openGist(filename, true);
+      openGist(result.name, true);
     } catch (err) {
       showToast(`Failed to save gist: ${err.message}`, 'error');
     }
@@ -633,9 +652,13 @@
   });
 
   async function openGist(filename, updateHash = true) {
-    switchTab('gist', false);
-    setGistMode('view');
+    if (!filename) return;
     currentGistFilename = filename;
+
+    if (panelGist && !panelGist.classList.contains('active')) {
+      switchTab('gist', false);
+    }
+    setGistMode('view');
     if (gistFileSelect && gistFileSelect.value !== filename) {
       gistFileSelect.value = filename;
     }
@@ -806,7 +829,6 @@
 
       if (data.share_file) {
         if (!window.location.hash.startsWith('#gist=') && window.location.hash !== '#dropzone') {
-          switchTab('files');
           openGist(data.share_file);
         }
       } else if (data.share_mode) {
@@ -814,7 +836,7 @@
           switchTab('files');
         }
       }
-      loadFiles();
+      await loadFiles();
     } catch (err) {
       connectionStatus.className = 'status-pill';
       connectionStatus.querySelector('.status-text').textContent = 'Offline';
@@ -995,6 +1017,9 @@
       switchTab('dropzone');
     } else if (hash === '#gist') {
       switchTab('gist');
+    } else if (hash === '#gist-new') {
+      switchTab('gist');
+      setGistMode('create');
     } else if (hash.startsWith('#gist=')) {
       const filename = decodeURIComponent(hash.substring(6));
       openGist(filename, false);

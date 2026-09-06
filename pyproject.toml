@@ -10,7 +10,10 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
 authors = [
-    { name = "MattInTech" }
+    { name = "Matt Hills" }
+]
+maintainers = [
+    { name = "mattintech", email = "mattintech@gmail.com" }
 ]
 keywords = [
     "clipboard",

@@ -119,6 +119,41 @@ class CliptoHTTPServer(ThreadingHTTPServer):
             return f"{base}{sep}k={key}"
         return base
 
+    def load_gists(self) -> List[str]:
+        """Return list of filenames explicitly created or shared as gists."""
+        gists: List[str] = []
+        if self.share_file and self.share_file.is_file():
+            gists.append(self.share_file.name)
+        gists_file = self.upload_dir / ".clipto_gists.json"
+        if gists_file.is_file():
+            try:
+                data = json.loads(gists_file.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    for item in data:
+                        if isinstance(item, str) and (self.upload_dir / item).is_file() and item not in gists:
+                            gists.append(item)
+            except Exception:
+                pass
+        return gists
+
+    def record_gist(self, filename: str) -> None:
+        """Persist a filename into the local gists registry."""
+        gists_file = self.upload_dir / ".clipto_gists.json"
+        existing: List[str] = []
+        if gists_file.is_file():
+            try:
+                data = json.loads(gists_file.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    existing = [x for x in data if isinstance(x, str)]
+            except Exception:
+                existing = []
+        if filename not in existing:
+            existing.append(filename)
+        try:
+            gists_file.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
 
 class CliptoRequestHandler(BaseHTTPRequestHandler):
     server: CliptoHTTPServer
@@ -254,6 +289,8 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         elif path == "/api/files":
+            gist_names = self.server.load_gists()
+            gist_set = set(gist_names)
             files_list = []
             if self.server.share_file and self.server.share_file.is_file():
                 f = self.server.share_file
@@ -265,6 +302,7 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                     "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(stat.st_mtime)),
                     "is_text": is_text_file(f),
                     "is_image": f.suffix.lower() in IMAGE_EXTENSIONS,
+                    "is_gist": f.name in gist_set,
                     "extension": f.suffix.lower().lstrip("."),
                     "raw_url": f"/raw/{urllib.parse.quote(f.name)}",
                 })
@@ -282,6 +320,7 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                                 "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(stat.st_mtime)),
                                 "is_text": is_text_file(entry),
                                 "is_image": entry.suffix.lower() in IMAGE_EXTENSIONS,
+                                "is_gist": entry.name in gist_set,
                                 "extension": entry.suffix.lower().lstrip("."),
                                 "raw_url": f"/raw/{urllib.parse.quote(entry.name)}",
                             })
@@ -293,6 +332,28 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 "files": files_list,
                 "count": len(files_list),
                 "share_mode": self.server.share_mode,
+                "gists": gist_names,
+            })
+        elif path == "/api/gists":
+            gist_names = self.server.load_gists()
+            gists_list = []
+            for name in gist_names:
+                target = (self.server.upload_dir / name).resolve()
+                if target.is_file():
+                    stat = target.stat()
+                    gists_list.append({
+                        "name": target.name,
+                        "size": stat.st_size,
+                        "mtime": stat.st_mtime,
+                        "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(stat.st_mtime)),
+                        "is_text": True,
+                        "is_gist": True,
+                        "extension": target.suffix.lower().lstrip("."),
+                        "raw_url": f"/raw/{urllib.parse.quote(target.name)}",
+                    })
+            self.send_json(200, {
+                "gists": gists_list,
+                "count": len(gists_list),
             })
         elif path == "/api/content":
             query = urllib.parse.parse_qs(parsed_url.query)
@@ -448,6 +509,38 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": f"Invalid request: {e}"})
             return
 
+        # Gist creation endpoint requires authentication
+        if self.path == "/api/gist":
+            if not self.is_authenticated():
+                self.send_json(401, {"error": "Authentication required", "auth_required": True})
+                return
+
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode("utf-8"))
+                raw_filename = (data.get("filename") or data.get("name") or "").strip()
+                filename = sanitize_filename(raw_filename, default_name="gist.txt")
+                content = str(data.get("content", ""))
+                target_path = get_unique_path(self.server.upload_dir, filename)
+                target_path.write_text(content, encoding="utf-8")
+                self.server.record_gist(target_path.name)
+                self.server.uploaded_files.append(target_path)
+                lines_count = len(content.splitlines())
+                self.send_json(200, {
+                    "status": "ok",
+                    "name": target_path.name,
+                    "path": str(target_path.resolve()),
+                    "size": target_path.stat().st_size,
+                    "lines": lines_count,
+                    "raw_url": f"/raw/{urllib.parse.quote(target_path.name)}",
+                })
+                if self.server.once and self.server.uploaded_files:
+                    threading.Timer(0.3, self.server.shutdown_event.set).start()
+            except Exception as e:
+                self.send_json(500, {"error": f"Failed to save gist: {e}"})
+            return
+
         # Upload endpoint requires authentication
         if not self.is_authenticated():
             self.send_json(401, {"error": "Authentication required", "auth_required": True})
@@ -472,6 +565,14 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
             raw_data = f"Content-Type: {content_type}\r\n\r\n".encode("utf-8") + body
             msg = BytesParser(policy=default).parsebytes(raw_data)
 
+            is_gist_upload = False
+            for part in msg.iter_parts():
+                name = part.get_param("name", header="content-disposition")
+                if name == "is_gist":
+                    val = part.get_payload(decode=True).decode("utf-8", errors="ignore").strip().lower()
+                    if val in ("1", "true", "yes"):
+                        is_gist_upload = True
+
             saved_results = []
             for part in msg.iter_parts():
                 filename = part.get_filename()
@@ -483,6 +584,8 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                         if text:
                             target_path = get_unique_path(self.server.upload_dir, "note.txt")
                             target_path.write_text(text, encoding="utf-8")
+                            if is_gist_upload:
+                                self.server.record_gist(target_path.name)
                             saved_results.append({
                                 "name": target_path.name,
                                 "path": str(target_path.resolve()),
@@ -498,6 +601,8 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
 
                 if payload is not None:
                     target_path.write_bytes(payload)
+                    if is_gist_upload:
+                        self.server.record_gist(target_path.name)
                     is_img = target_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
                     saved_results.append({
                         "name": target_path.name,
