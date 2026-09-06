@@ -19,11 +19,14 @@ Ever run an AI agent, Docker container, or SSH session on a remote server, but n
 ## ✨ Features
 
 - **⚡ Zero-Click Paste:** Open the page and press `Cmd+V` or `Ctrl+V` anywhere. No buttons or input selection required.
-- **📄 Private Gists & File Sharing (`clipto share [path]`):** Instant private gist viewer and outbound file bridge. Browse directory files, preview code with line numbers, or stream binaries.
-- **⚡ 1-Click `curl` Copy:** Copy direct `curl` commands from the terminal banner or web UI to pipe files directly to remote servers or terminal sessions.
+- **📄 Interactive Private Gists:** Dedicated Gist tab with an in-browser `+ New Gist` creator, code viewer with line numbers, 1-click raw clipboard copy, and direct `curl` download commands.
+- **📁 Files Browser (Grid & List View):** Switch between a compact file table and visual card grid with image thumbnails, file previews, and instant search filtering.
+- **⚙️ Settings & Tab Customization (<kbd>Cmd+,</kbd> / <kbd>Ctrl+,</kbd>):** Reorder tabs (e.g. `Gist | Upload & Paste | Files`) to fit your workflow, saved automatically to global config (`~/.clipto/config.json`).
+- **🎯 Streamlined Icon Action Bar:** 1-click header buttons to copy target directory path, copy host name, open phone QR modal, access connection help, and configure settings.
+- **⚡ 1-Click `curl` Commands:** Copy direct `curl` commands from the terminal banner or web UI to pipe files directly to remote servers or terminal sessions.
 - **🖼️ Thumbnail Grid & Lightbox:** Visual thumbnail cards with click-to-enlarge full-screen preview.
 - **🚇 Public HTTPS Tunnels (`--tunnel`):** Instant, secure internet access from cellular or remote servers via Cloudflare Quick Tunnels.
-- **🔒 Direct HTTPS & Self-Signed Certs (`--self-signed` / `--cert`):** Enable local HTTPS so remote/LAN browsers have full clipboard read & write access.
+- **🔒 Direct HTTPS & Self-Signed Certs (`--self-signed` / `--cert`):** Enable local HTTPS with automatic SANs and HTTP-to-HTTPS redirect for full remote clipboard read & write access.
 - **📱 Phone QR Code (`--qr`):** Print a high-contrast terminal QR code or click "Phone QR" in the web UI to snap and upload from your phone camera.
 - **🔐 Authenticator App TOTP (`--totp` / `--totp-setup`):** 6-digit rolling codes with Google Authenticator, Microsoft Authenticator, 1Password, or Apple Passwords.
 - **🔒 PIN & Password Protection (`--pin` / `--pass`):** Protect access with an auto-generated 4-digit PIN or custom passphrase (auto-enabled on `--tunnel`).
@@ -89,9 +92,10 @@ clipto my_script.py
 Clipto formats a direct `curl` command right in the terminal banner:
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
-│ 📎 Clipto v0.1.3 [SHARING FILE]                                        │
+│ 📎 Clipto v0.2.0 [SHARING FILE]                                        │
 │ File:       deploy.sh (3.2 KB)                                         │
 │ Directory:  /Users/matt/code/project                                   │
+│ Config:     /Users/matt/.clipto/config.json                            │
 │ Local:      http://localhost:8765                                      │
 │ Network:    http://192.168.1.100:8765                                  │
 │ Curl (CLI): curl -sSL "http://localhost:8765/raw/deploy.sh" -o deploy.sh│
@@ -108,12 +112,33 @@ Combine `share` with `--once` to serve the file exactly once and terminate immed
 clipto share app-binary --once
 ```
 
-### 3. In-Browser Gist Viewer & Directory Browser
+### 3. Interactive Private Gists & Code Viewer
 
-Run `clipto share` (or `clipto share /path/to/folder`) and click the **Files & Gists** tab:
-* **Interactive Code Viewer:** Click any text or script file to view formatted code with line numbers, 1-click "Copy Raw", and direct download.
+Click the **Gist** tab to view, create, and share private code snippets:
+* **`+ New Gist` Creator:** Click `+ New Gist` to draft code, select syntax or filename, and save immediately.
+* **Line Numbers & 1-Click Copy:** View clean code with line numbers, click **Copy Gist** to copy raw content to your clipboard, or trigger direct browser downloads.
+* **1-Click `curl` Command:** Copy direct `curl` commands to pipe or download scripts on any remote machine.
+
+<p align="center">
+  <img src="assets/clipto-gist-viewer.png" alt="Clipto Interactive Gist Viewer" width="850">
+</p>
+
+### 4. Files Browser (Grid & List View)
+
+Click the **Files** tab to browse everything in the active directory:
+* **Grid & List Views:** Toggle between a compact file table and a responsive card grid with image thumbnails and document previews.
+* **Direct Downloads & curl:** Download any file with a single click or copy CLI curl commands.
 * **Instant Search Filter:** Real-time search by filename or extension.
-* **1-Click curl Command:** Copy CLI download commands directly from each row in the browser.
+
+<p align="center">
+  <img src="assets/clipto-files-browser.png" alt="Clipto Files Browser" width="850">
+</p>
+
+### 5. Settings & Tab Customization
+
+Press <kbd>Cmd+,</kbd> (Mac) or <kbd>Ctrl+,</kbd> (Windows/Linux)—or click the gear icon (`⚙️`) in the top right header—to open the **Settings** modal:
+* **Custom Tab Order:** Reorder your segmented tabs (e.g. `Gist | Upload & Paste | Files` or `Files | Gist`) using interactive up/down controls.
+* **Global Configuration:** Preferences are automatically saved in `~/.clipto/config.json`. The active path is displayed in both the settings modal and the startup terminal banner.
 
 ---
 
