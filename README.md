@@ -10,6 +10,10 @@ Ever run an AI agent, Docker container, or SSH session on a remote server, but n
 
 **Clipto** solves this. Run `clipto` in any directory on your machine or remote server, open the link in your browser, and hit **Cmd+V / Ctrl+V**. Your screenshot or clipboard contents are immediately saved right into that folder.
 
+<p align="center">
+  <img src="assets/clipto-web-ui.png" alt="Clipto Web UI" width="850">
+</p>
+
 ---
 
 ## ✨ Features
@@ -46,18 +50,17 @@ Run `clipto` in whichever directory you want files to land:
 clipto
 ```
 
-You'll see a clean terminal banner with the local and LAN URLs:
+Pass `-o / --open` to automatically launch your browser, or `-q / --qr` to display a terminal QR code:
 
-```text
-┌─────────────────────────────────────────┐
-│  📎 Clipto v0.1.2                       │
-│  Saving to: /Users/matt/code/my-project │
-│  Local:     http://localhost:8765       │
-│  Network:   http://192.168.1.50:8765    │
-└─────────────────────────────────────────┘
+```bash
+clipto --tunnel --totp --qr
 ```
 
-1. Open the URL in your browser (or pass `-o / --open` to auto-open).
+<p align="center">
+  <img src="assets/clipto-terminal-banner.png" alt="Clipto Terminal Banner & QR Code" width="850">
+</p>
+
+1. Open the URL in your browser (or scan the terminal QR code with your phone).
 2. Hit `Cmd+V` to paste a screenshot, or drag files onto the page.
 3. The files are instantly written to your current directory!
 
@@ -73,58 +76,62 @@ To use Google Authenticator, Microsoft Authenticator, 1Password, or Apple Passwo
 clipto --totp-setup
 ```
 
-Clipto will generate a secure key in `~/.clipto/totp.key` and print a setup QR code in your terminal. Scan it with your phone's authenticator app to pair!
+Clipto generates a secure 160-bit key in `~/.clipto/totp.key` (`0600` permissions) and displays a terminal QR code. Scan it with your phone's authenticator app:
+
+<p align="center">
+  <img src="assets/clipto-totp-setup.png" alt="Clipto TOTP Authenticator Setup" width="800">
+</p>
 
 ### Step 2: Running with TOTP Protection
 
 ```bash
 clipto --totp
-# or combined with a tunnel:
+# or combined with an encrypted public tunnel:
 clipto --tunnel --totp
 ```
 
 * **Zero-Typing For You:** The terminal link and QR code include the active 30-second token (`?k=CODE`), logging you in automatically.
-* **Locked For Outsiders:** Anyone without the link must enter the 6-digit rolling code from the authenticator app.
+* **Locked For Outsiders:** Anyone connecting without the token hits a clean 6-digit authenticator lock screen:
+
+<p align="center">
+  <img src="assets/clipto-totp-lock.png" alt="Clipto TOTP Lock Screen" width="750">
+</p>
 
 ---
 
 ## 🚇 Remote Access & Public Tunneling
 
-When running on a cloud VM, Docker container, or uploading from your phone on cellular data:
-
 ```bash
 clipto --tunnel
 ```
 
-Clipto launches an encrypted, free public HTTPS tunnel via Cloudflare:
-
-```text
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  📎 Clipto v0.1.2                                                           │
-│  Saving to:  /Users/matt/code/my-project                                    │
-│  PIN / Key:  8421 🔒                                                        │
-│  Tunnel:     https://gentle-winds-example.trycloudflare.com/?k=8421 🌍      │
-│  Local:      http://localhost:8765/?k=8421                                  │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+Clipto launches an encrypted, free public HTTPS tunnel via Cloudflare Quick Tunnels.
 
 * **Zero-Typing For You:** The tunnel link and QR code already contain your auth token (`?k=PIN`), logging you in automatically.
 * **Locked For Everyone Else:** Anyone discovering your public tunnel URL hits a clean PIN lock screen.
-* **Want to learn more?** Run `clipto --help-tunnel` for a cheat sheet on tunnels and SSH port forwarding.
+* **Built-in Remote Guide:** Run `clipto --help-tunnel` or click **`[ ❓ Help ]`** in the web UI for interactive cheat sheets on Cloudflare tunnels, Tailscale / WireGuard, and SSH local port forwarding (`ssh -L`):
+
+<p align="center">
+  <img src="assets/clipto-tunnel-help-modal.png" alt="Clipto Remote Access & Tunnel Guide" width="750">
+</p>
 
 ---
 
-## 📱 Mobile & Security Options
+## 📱 Mobile Uploads
 
-### Phone Upload with QR Code
+Upload photos, documents, or screenshots directly from your mobile phone:
 
 ```bash
 clipto --qr
-# or combined with tunnel:
+# or with a public tunnel:
 clipto --tunnel --qr
 ```
 
-A QR code is rendered directly in your terminal pointing to your reachable address. Point your phone camera at your terminal to open the upload page instantly!
+A QR code is rendered directly in your terminal. You can also click **`[ 📱 Phone QR ]`** in the web header at any time to display the QR code on your desktop screen:
+
+<p align="center">
+  <img src="assets/clipto-phone-qr-modal.png" alt="Clipto Phone QR Modal" width="700">
+</p>
 
 ### PIN & Password Protection
 

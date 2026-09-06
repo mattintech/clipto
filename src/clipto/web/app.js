@@ -552,6 +552,8 @@
         // Clean URL so the key doesn't sit in the address bar
         const cleanUrl = window.location.pathname;
         window.history.replaceState(null, '', cleanUrl);
+        if (window.location.hash === '#help') openHelpModal();
+        else if (window.location.hash === '#qr') openQrModal();
       }
     } else {
       // Check auth status
@@ -565,11 +567,21 @@
           authInput.focus();
         } else {
           loadInfo();
+          if (window.location.hash === '#help') openHelpModal();
+          else if (window.location.hash === '#qr') openQrModal();
         }
       } catch (err) {
         loadInfo();
+        if (window.location.hash === '#help') openHelpModal();
+        else if (window.location.hash === '#qr') openQrModal();
       }
     }
+
+    // Support hashchange dynamically
+    window.addEventListener('hashchange', () => {
+      if (window.location.hash === '#help') openHelpModal();
+      else if (window.location.hash === '#qr') openQrModal();
+    });
   }
 
   init();
