@@ -44,6 +44,17 @@ Ever run an AI agent, Docker container, or SSH session on a remote server, but n
 
 ### Installation
 
+**macOS (Homebrew):**
+```bash
+brew install mattintech/tap/clipto
+```
+
+**Python (pipx / PEP 668 recommended):**
+```bash
+pipx install clipto
+```
+
+**Linux / Remote Containers (pip):**
 ```bash
 pip install clipto
 ```
