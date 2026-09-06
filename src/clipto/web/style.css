@@ -268,6 +268,12 @@ body {
   font-size: 0.82rem;
 }
 
+.btn.copied {
+  background-color: rgba(16, 185, 129, 0.2) !important;
+  color: #34d399 !important;
+  border-color: rgba(16, 185, 129, 0.4) !important;
+}
+
 /* Card */
 .card {
   background-color: var(--bg-card);
@@ -1204,6 +1210,14 @@ body {
   align-items: center;
 }
 
+.gist-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
 .gist-file-select {
   background: var(--bg-base);
   color: var(--text-main);
@@ -1223,10 +1237,59 @@ body {
   box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
 }
 
+.gist-filename-input {
+  background: var(--bg-base);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 7px 12px;
+  font-size: 0.88rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  width: 100%;
+  max-width: 320px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.gist-filename-input:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+.gist-filename-input::placeholder {
+  color: #64748b;
+}
+
 .gist-toolbar-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.gist-create-wrapper {
+  display: flex;
+  flex: 1;
+  min-height: 420px;
+  background: #0b101b;
+}
+
+.gist-textarea {
+  width: 100%;
+  min-height: 420px;
+  background: transparent;
+  color: #f8fafc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  border: none;
+  outline: none;
+  resize: vertical;
+  padding: 18px 22px;
+  tab-size: 4;
+}
+
+.gist-textarea::placeholder {
+  color: #475569;
 }
 
 .gist-code-wrapper {

@@ -438,6 +438,27 @@ class TestCliptoServer(unittest.TestCase):
         args3 = parser.parse_args(["my_archive.zip"])
         self.assertEqual(args3.share_args, ["my_archive.zip"])
 
+    def test_print_banner_share_mode(self):
+        from clipto.cli import print_banner
+        test_file = self.temp_dir / "test_file.txt"
+        test_file.write_text("sample content")
+
+        old_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+        try:
+            print_banner(
+                port=8765,
+                target_dir=self.temp_dir,
+                share_mode=True,
+                share_file=test_file,
+            )
+            output = sys.stderr.getvalue()
+            self.assertIn("SHARING FILE", output)
+            self.assertIn("test_file.txt", output)
+            self.assertIn("curl -sSL", output)
+        finally:
+            sys.stderr = old_stderr
+
 
 if __name__ == "__main__":
     unittest.main()

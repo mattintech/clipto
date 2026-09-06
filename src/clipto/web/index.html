@@ -202,7 +202,7 @@
         </div>
       </div>
 
-      <!-- Panel 3: Dedicated Gist Viewer -->
+      <!-- Panel 3: Dedicated Gist Viewer & Creator -->
       <div id="panel-gist" class="tab-panel">
         <div class="gist-card card">
           <div class="gist-toolbar">
@@ -213,18 +213,36 @@
                   <polyline points="8 6 2 12 8 18"></polyline>
                 </svg>
               </div>
-              <select id="gist-file-select" class="gist-file-select" aria-label="Select file to view">
-                <option value="">Select a file...</option>
-              </select>
-              <span id="gist-meta-badge" class="badge">0 lines</span>
+
+              <!-- View Mode Selectors -->
+              <div id="gist-view-selectors" class="gist-toolbar-group">
+                <select id="gist-file-select" class="gist-file-select" aria-label="Select file to view">
+                  <option value="">Select a file...</option>
+                </select>
+                <span id="gist-meta-badge" class="badge">0 lines</span>
+              </div>
+
+              <!-- Create Mode Filename Input -->
+              <div id="gist-create-selectors" class="gist-toolbar-group hidden">
+                <input type="text" id="gist-new-filename" class="gist-filename-input" placeholder="filename.py, note.txt, snippet.sh..." aria-label="New gist filename">
+              </div>
             </div>
-            <div class="gist-toolbar-actions">
-              <button id="btn-gist-copy-raw" class="btn btn-secondary btn-sm" title="Copy raw content">
+
+            <!-- View Mode Actions -->
+            <div id="gist-view-actions" class="gist-toolbar-actions">
+              <button id="btn-gist-new" class="btn btn-primary btn-sm" title="Create a new Gist">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span>+ New Gist</span>
+              </button>
+              <button id="btn-gist-copy-raw" class="btn btn-secondary btn-sm" title="Copy entire gist contents to clipboard">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                   <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                 </svg>
-                <span>Copy Raw</span>
+                <span>Copy Gist</span>
               </button>
               <a id="btn-gist-download" class="btn btn-secondary btn-sm" download title="Download file">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -234,7 +252,7 @@
                 </svg>
                 <span>Download</span>
               </a>
-              <button id="btn-gist-copy-curl" class="btn btn-secondary btn-sm" title="Copy curl command">
+              <button id="btn-gist-copy-curl" class="btn btn-secondary btn-sm" title="Copy CLI curl command">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="4 17 10 11 4 5"></polyline>
                   <line x1="12" y1="19" x2="20" y2="19"></line>
@@ -242,12 +260,39 @@
                 <span>curl</span>
               </button>
             </div>
+
+            <!-- Create Mode Actions -->
+            <div id="gist-create-actions" class="gist-toolbar-actions hidden">
+              <button id="btn-gist-paste-clipboard" class="btn btn-secondary btn-sm" title="Paste from clipboard">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                  <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+                </svg>
+                <span>Paste Clipboard</span>
+              </button>
+              <button id="btn-gist-save" class="btn btn-primary btn-sm" title="Save Gist to directory">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                  <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                  <polyline points="7 3 7 8 15 8"></polyline>
+                </svg>
+                <span>Save Gist</span>
+              </button>
+              <button id="btn-gist-cancel" class="btn btn-secondary btn-sm" title="Cancel creation">Cancel</button>
+            </div>
           </div>
-          <div class="gist-code-wrapper">
+
+          <!-- Body: View Mode -->
+          <div id="gist-view-wrapper" class="gist-code-wrapper">
             <div id="gist-code-container" class="gist-code-container">
               <pre id="gist-line-numbers" class="gist-line-numbers">1</pre>
-              <pre id="gist-code-content" class="gist-code-content">Select a file from the dropdown or the Files tab to view its contents.</pre>
+              <pre id="gist-code-content" class="gist-code-content">Select a file from the dropdown or click + New Gist to create one.</pre>
             </div>
+          </div>
+
+          <!-- Body: Create Mode -->
+          <div id="gist-create-wrapper" class="gist-create-wrapper hidden">
+            <textarea id="gist-new-content" class="gist-textarea" placeholder="Paste or type code / text here...&#10;&#10;Pro-tip: Click 'Paste Clipboard' above or press Cmd+V to quickly paste snippet." spellcheck="false"></textarea>
           </div>
         </div>
       </div>

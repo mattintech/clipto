@@ -4,6 +4,7 @@ import os
 import sys
 import threading
 import time
+import urllib.parse
 import webbrowser
 from pathlib import Path
 from typing import Optional

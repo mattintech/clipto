@@ -32,9 +32,21 @@
   // Dedicated Gist Panel elements
   const gistFileSelect = document.getElementById('gist-file-select');
   const gistMetaBadge = document.getElementById('gist-meta-badge');
+  const btnGistNew = document.getElementById('btn-gist-new');
   const btnGistCopyRaw = document.getElementById('btn-gist-copy-raw');
   const btnGistDownload = document.getElementById('btn-gist-download');
   const btnGistCopyCurl = document.getElementById('btn-gist-copy-curl');
+  const btnGistPasteClipboard = document.getElementById('btn-gist-paste-clipboard');
+  const btnGistSave = document.getElementById('btn-gist-save');
+  const btnGistCancel = document.getElementById('btn-gist-cancel');
+  const gistNewFilename = document.getElementById('gist-new-filename');
+  const gistNewContent = document.getElementById('gist-new-content');
+  const gistViewSelectors = document.getElementById('gist-view-selectors');
+  const gistCreateSelectors = document.getElementById('gist-create-selectors');
+  const gistViewActions = document.getElementById('gist-view-actions');
+  const gistCreateActions = document.getElementById('gist-create-actions');
+  const gistViewWrapper = document.getElementById('gist-view-wrapper');
+  const gistCreateWrapper = document.getElementById('gist-create-wrapper');
   const gistLineNumbers = document.getElementById('gist-line-numbers');
   const gistCodeContent = document.getElementById('gist-code-content');
 
@@ -503,7 +515,116 @@
     showToast('Files refreshed');
   });
 
-  // Gist Panel functions
+  // Gist Panel functions & mode toggling
+  function setGistMode(mode) {
+    if (mode === 'create') {
+      gistViewSelectors.classList.add('hidden');
+      gistCreateSelectors.classList.remove('hidden');
+      gistViewActions.classList.add('hidden');
+      gistCreateActions.classList.remove('hidden');
+      gistViewWrapper.classList.add('hidden');
+      gistCreateWrapper.classList.remove('hidden');
+
+      if (!gistNewFilename.value.trim()) {
+        const now = new Date();
+        const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+        const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '');
+        gistNewFilename.value = `gist_${dateStr}_${timeStr}.txt`;
+      }
+      gistNewContent.focus();
+    } else {
+      gistViewSelectors.classList.remove('hidden');
+      gistCreateSelectors.classList.add('hidden');
+      gistViewActions.classList.remove('hidden');
+      gistCreateActions.classList.add('hidden');
+      gistViewWrapper.classList.remove('hidden');
+      gistCreateWrapper.classList.add('hidden');
+    }
+  }
+
+  btnGistNew.addEventListener('click', () => {
+    switchTab('gist', false);
+    setGistMode('create');
+  });
+
+  btnGistCancel.addEventListener('click', () => {
+    setGistMode('view');
+  });
+
+  // Paste from clipboard button
+  btnGistPasteClipboard.addEventListener('click', async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          gistNewContent.value = text;
+          showToast('Pasted clipboard contents into editor');
+          return;
+        }
+      }
+    } catch (err) {
+      // Permission restricted or rejected
+    }
+    gistNewContent.focus();
+    showToast('Press Cmd+V / Ctrl+V to paste into the editor', 'info');
+  });
+
+  // Save new gist
+  btnGistSave.addEventListener('click', async () => {
+    const content = gistNewContent.value;
+    if (!content.trim()) {
+      showToast('Please enter or paste content for your gist', 'error');
+      gistNewContent.focus();
+      return;
+    }
+
+    let filename = gistNewFilename.value.trim();
+    if (!filename) {
+      const now = new Date();
+      const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+      const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '');
+      filename = `gist_${dateStr}_${timeStr}.txt`;
+    }
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const formData = new FormData();
+    formData.append('files', blob, filename);
+
+    try {
+      showToast('Saving gist...', 'info');
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (res.status === 401) {
+        lockScreen.classList.remove('hidden');
+        showAuthError('Session expired. Please re-authenticate.');
+        return;
+      }
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || 'Failed to save gist');
+      }
+
+      const result = await res.json();
+      playSuccessChime();
+      showToast(`Gist saved: ${filename}`);
+
+      // Clear editor
+      gistNewContent.value = '';
+      gistNewFilename.value = '';
+
+      // Reload files list and open newly created gist
+      await loadFiles();
+      setGistMode('view');
+      openGist(filename, true);
+    } catch (err) {
+      showToast(`Failed to save gist: ${err.message}`, 'error');
+    }
+  });
+
   gistFileSelect.addEventListener('change', () => {
     const selected = gistFileSelect.value;
     if (selected) {
@@ -513,6 +634,7 @@
 
   async function openGist(filename, updateHash = true) {
     switchTab('gist', false);
+    setGistMode('view');
     currentGistFilename = filename;
     if (gistFileSelect && gistFileSelect.value !== filename) {
       gistFileSelect.value = filename;
@@ -558,13 +680,20 @@
   }
 
   btnGistCopyRaw.addEventListener('click', async () => {
-    if (!currentRawGistText) return;
+    if (!currentRawGistText) {
+      showToast('No gist content to copy', 'error');
+      return;
+    }
     try {
       await navigator.clipboard.writeText(currentRawGistText);
       const span = btnGistCopyRaw.querySelector('span');
-      const orig = span ? span.textContent : 'Copy Raw';
-      if (span) span.textContent = 'Copied!';
-      setTimeout(() => { if (span) span.textContent = orig; }, 2000);
+      const orig = span ? span.textContent : 'Copy Gist';
+      if (span) span.textContent = '✓ Copied!';
+      btnGistCopyRaw.classList.add('copied');
+      setTimeout(() => {
+        if (span) span.textContent = orig;
+        btnGistCopyRaw.classList.remove('copied');
+      }, 2000);
       showToast(`Copied ${currentGistFilename} to clipboard`);
     } catch (err) {
       showToast('Failed to copy to clipboard', 'error');
