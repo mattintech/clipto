@@ -17,6 +17,7 @@ Ever run an AI agent, Docker container, or SSH session on a remote server, but n
 - **⚡ Zero-Click Paste:** Open the page and press `Cmd+V` or `Ctrl+V` anywhere. No buttons or input selection required.
 - **🖼️ Thumbnail Grid & Lightbox:** Visual thumbnail cards with click-to-enlarge full-screen preview.
 - **📱 Phone QR Code (`--qr`):** Print a high-contrast terminal QR code or click "Phone QR" in the web UI to snap and upload from your phone camera.
+- **🔒 PIN & Password Protection (`--pin` / `--pass`):** Protect access with an auto-generated 4-digit PIN or custom passphrase.
 - **🎯 Drag & Drop:** Drop multiple files, images, or documents straight onto the window.
 - **📝 Text & Note Box:** Paste stack traces, error logs, or notes to save directly as `.txt` files.
 - **🤖 AI Agent Friendly (`--once`):** One-shot mode spins up the server, waits for an upload, writes the file, prints the saved path to `stdout`, and exits cleanly.
@@ -57,15 +58,33 @@ You'll see a clean terminal banner with the local and LAN URLs:
 2. Hit `Cmd+V` to paste a screenshot, or drag files onto the page.
 3. The files are instantly written to your current directory!
 
-### Phone Upload with QR Code
+---
 
-Want to quickly upload a photo or screenshot from your phone? Pass `-q` / `--qr`:
+## 📱 Mobile & Security Options
+
+### Phone Upload with QR Code
 
 ```bash
 clipto --qr
 ```
 
-A QR code will be generated in your terminal pointing to your LAN/Tailscale IP. Point your phone camera at your terminal screen to open the upload page instantly!
+A QR code is rendered directly in your terminal pointing to your LAN/Tailscale IP. Point your phone camera at your terminal to open the upload page instantly!
+
+### PIN & Password Protection
+
+To prevent unauthorized access across your local network or future tunnels:
+
+```bash
+# Auto-generate a secure 4-digit PIN:
+clipto --pin
+
+# Or use your own password:
+clipto --pass mysecret
+```
+
+* **Zero friction for you:** The generated terminal hyperlink and QR code automatically include the auth key (`?k=PIN`), so clicking or scanning logs you in instantly with zero typing!
+* **Protected against outsiders:** Anyone opening the root link without the key must enter the PIN/password on a lock screen.
+* **Rate-limited:** Brute-force attempts are automatically blocked after 5 failed tries.
 
 ---
 
@@ -91,7 +110,7 @@ The agent gets the exact file path back into its visual/multimodal context!
 ## ⚙️ CLI Reference
 
 ```text
-usage: clipto [-h] [-v] [-p PORT] [--no-hunt] [-d DIR] [-1] [-t TITLE] [-o] [-q] [--host HOST] [--timeout TIMEOUT]
+usage: clipto [-h] [-v] [-p PORT] [--no-hunt] [-d DIR] [-1] [-t TITLE] [-o] [-q] [--pin] [--pass PASSWORD] [--host HOST] [--timeout TIMEOUT]
 
 Instant clipboard, screenshot, and file bridge from browser to terminal.
 
@@ -105,7 +124,9 @@ options:
   -t TITLE, --title TITLE
                         Custom session title or prompt shown in the UI header.
   -o, --open            Automatically open web UI in default browser on launch.
-  -q, --qr              Display a terminal QR code for the network URL (easy mobile phone scanning).
+  -q, --qr              Display a terminal QR code for the network URL.
+  --pin                 Protect access with an auto-generated 4-digit PIN.
+  --pass PASSWORD       Protect access with a custom password.
   --host HOST           Host to bind to (default: 0.0.0.0).
   --timeout TIMEOUT     Timeout in seconds (useful with --once).
 ```

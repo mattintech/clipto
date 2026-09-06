@@ -182,3 +182,63 @@ if __name__ == "__main__":
             self.assertEqual(resp.headers.get("Content-Type"), "image/svg+xml; charset=utf-8")
             content = resp.read().decode("utf-8")
             self.assertTrue(content.startswith("<svg"))
+
+    def test_pin_and_auth_protection(self):
+        # Create server with PIN
+        pin_dir = Path(tempfile.mkdtemp())
+        pin_port = find_available_port(0)
+        pin_server = CliptoHTTPServer(
+            ("127.0.0.1", pin_port),
+            CliptoRequestHandler,
+            upload_dir=pin_dir,
+            title="Protected Session",
+            once=False,
+            auth_token="1234",
+        )
+        pin_thread = threading.Thread(target=pin_server.serve_forever, daemon=True)
+        pin_thread.start()
+        time.sleep(0.1)
+
+        try:
+            # 1. Unauthenticated request to /api/info should fail with 401
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{pin_port}/api/info")
+                self.fail("Expected HTTPError 401")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 401)
+
+            # 2. Authenticate with wrong PIN should return 401
+            auth_req = urllib.request.Request(
+                f"http://127.0.0.1:{pin_port}/api/auth",
+                data=json.dumps({"key": "wrong"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(auth_req)
+                self.fail("Expected HTTPError 401")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 401)
+
+            # 3. Authenticate with correct PIN
+            auth_req_good = urllib.request.Request(
+                f"http://127.0.0.1:{pin_port}/api/auth",
+                data=json.dumps({"key": "1234"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(auth_req_good) as resp:
+                self.assertEqual(resp.status, 200)
+                cookie = resp.headers.get("Set-Cookie")
+                self.assertIn("clipto_auth=1234", cookie)
+
+            # 4. Request with query param ?k=1234 should succeed directly
+            with urllib.request.urlopen(f"http://127.0.0.1:{pin_port}/api/info?k=1234") as resp:
+                self.assertEqual(resp.status, 200)
+                data = json.loads(resp.read().decode())
+                self.assertEqual(data["title"], "Protected Session")
+
+        finally:
+            pin_server.shutdown()
+            pin_server.server_close()
+            shutil.rmtree(pin_dir, ignore_errors=True)

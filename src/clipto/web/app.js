@@ -14,6 +14,14 @@
   const btnViewList = document.getElementById('btn-view-list');
   const btnViewGrid = document.getElementById('btn-view-grid');
 
+  // Phone QR Modal elements
+  const btnPhoneQr = document.getElementById('btn-phone-qr');
+  const qrModal = document.getElementById('qr-modal');
+  const qrModalClose = document.getElementById('qr-modal-close');
+  const qrModalBackdrop = qrModal.querySelector('.modal-backdrop');
+  const qrUrlDisplay = document.getElementById('qr-url-display');
+  const btnCopyUrl = document.getElementById('btn-copy-url');
+
   // Lightbox elements
   const lightbox = document.getElementById('lightbox');
   const lightboxImg = document.getElementById('lightbox-img');
@@ -21,9 +29,18 @@
   const lightboxClose = document.getElementById('lightbox-close');
   const lightboxBackdrop = lightbox.querySelector('.lightbox-backdrop');
 
+  // Lock Screen elements
+  const lockScreen = document.getElementById('lock-screen');
+  const lockCard = lockScreen.querySelector('.lock-card');
+  const authForm = document.getElementById('auth-form');
+  const authInput = document.getElementById('auth-input');
+  const btnUnlock = document.getElementById('btn-unlock');
+  const authError = document.getElementById('auth-error');
+
   let uploadedItems = [];
   let isOnceMode = false;
-  let currentViewMode = localStorage.getItem('clipto_view_mode') || 'grid'; // Default to thumbnail grid!
+  let currentMobileUrl = '';
+  let currentViewMode = localStorage.getItem('clipto_view_mode') || 'grid';
 
   // Sound chime via Web Audio API (zero external assets)
   function playSuccessChime() {
@@ -83,9 +100,36 @@
 
   lightboxClose.addEventListener('click', closeLightbox);
   lightboxBackdrop.addEventListener('click', closeLightbox);
+
+  // Phone QR Modal functions
+  function openQrModal() {
+    qrModal.classList.add('active');
+  }
+
+  function closeQrModal() {
+    qrModal.classList.remove('active');
+  }
+
+  btnPhoneQr.addEventListener('click', openQrModal);
+  qrModalClose.addEventListener('click', closeQrModal);
+  qrModalBackdrop.addEventListener('click', closeQrModal);
+
+  btnCopyUrl.addEventListener('click', async () => {
+    if (!currentMobileUrl) return;
+    try {
+      await navigator.clipboard.writeText(currentMobileUrl);
+      btnCopyUrl.textContent = 'Copied!';
+      setTimeout(() => btnCopyUrl.textContent = 'Copy', 2000);
+      showToast('Network URL copied to clipboard');
+    } catch (err) {
+      showToast('Could not copy to clipboard', 'error');
+    }
+  });
+
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && lightbox.classList.contains('active')) {
-      closeLightbox();
+    if (e.key === 'Escape') {
+      if (qrModal.classList.contains('active')) closeQrModal();
+      if (lightbox.classList.contains('active')) closeLightbox();
     }
   });
 
@@ -106,7 +150,6 @@
       const isImg = item.is_image;
 
       if (currentViewMode === 'grid') {
-        // Thumbnail Card View
         const card = document.createElement('div');
         card.className = 'grid-card';
 
@@ -144,7 +187,6 @@
 
         uploadsList.appendChild(card);
       } else {
-        // List View
         const row = document.createElement('div');
         row.className = 'upload-item';
 
@@ -198,16 +240,66 @@
   btnViewList.addEventListener('click', () => setViewMode('list'));
   btnViewGrid.addEventListener('click', () => setViewMode('grid'));
 
+  // Auth & Session functions
+  async function submitAuth(key) {
+    authError.classList.add('hidden');
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.authenticated) {
+        lockScreen.classList.add('hidden');
+        loadInfo();
+        showToast('Connected to session');
+        return true;
+      } else {
+        showAuthError(data.error || 'Incorrect PIN or password');
+        return false;
+      }
+    } catch (err) {
+      showAuthError('Connection failed');
+      return false;
+    }
+  }
+
+  function showAuthError(msg) {
+    authError.textContent = msg;
+    authError.classList.remove('hidden');
+    lockCard.classList.remove('shake');
+    void lockCard.offsetWidth; // Trigger reflow for animation
+    lockCard.classList.add('shake');
+    authInput.value = '';
+    authInput.focus();
+  }
+
+  authForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const key = authInput.value.trim();
+    if (key) submitAuth(key);
+  });
+
   // Fetch session info
   async function loadInfo() {
     try {
       const res = await fetch('/api/info');
+      if (res.status === 401) {
+        lockScreen.classList.remove('hidden');
+        authInput.focus();
+        return;
+      }
+
       if (!res.ok) throw new Error('Failed to fetch info');
       const data = await res.json();
 
       hostnameDisplay.textContent = data.hostname || 'localhost';
       dirDisplay.textContent = data.dir || '.';
       isOnceMode = !!data.once;
+      currentMobileUrl = data.mobile_url || window.location.href;
+      qrUrlDisplay.textContent = currentMobileUrl;
 
       if (data.title) {
         sessionTitle.textContent = data.title;
@@ -232,6 +324,12 @@
         method: 'POST',
         body: formData,
       });
+
+      if (res.status === 401) {
+        lockScreen.classList.remove('hidden');
+        showAuthError('Session expired. Please enter PIN/password.');
+        return;
+      }
 
       if (!res.ok) {
         const errorText = await res.text();
@@ -279,8 +377,7 @@
 
   // Global Paste Handler
   window.addEventListener('paste', (e) => {
-    // If active element is the note input textarea, allow standard paste inside it
-    if (document.activeElement === noteInput) {
+    if (document.activeElement === noteInput || document.activeElement === authInput) {
       return;
     }
 
@@ -311,7 +408,6 @@
       }
     }
 
-    // If no image, but text was pasted and user isn't in an input, paste into note input
     if (!foundImage) {
       const text = clipboardData.getData('text');
       if (text && text.trim().length > 0) {
@@ -354,7 +450,7 @@
   // File input picker
   fileInput.addEventListener('change', () => {
     handleFiles(fileInput.files);
-    fileInput.value = ''; // reset
+    fileInput.value = '';
   });
 
   // Note box handlers
@@ -380,77 +476,37 @@
     btnSendNote.disabled = true;
   });
 
-  // Initialize
-  setViewMode(currentViewMode);
-  loadInfo();
+  // Initialization & Auto-Auth Check
+  async function init() {
+    setViewMode(currentViewMode);
+
+    // Check for query parameter ?k=... for magic link / QR code instant login
+    const params = new URLSearchParams(window.location.search);
+    const key = params.get('k');
+
+    if (key) {
+      const authed = await submitAuth(key);
+      if (authed) {
+        // Clean URL so the key doesn't sit in the address bar
+        const cleanUrl = window.location.pathname;
+        window.history.replaceState(null, '', cleanUrl);
+      }
+    } else {
+      // Check auth status
+      try {
+        const authRes = await fetch('/api/auth');
+        const authData = await authRes.json();
+        if (authData.required && !authData.authenticated) {
+          lockScreen.classList.remove('hidden');
+          authInput.focus();
+        } else {
+          loadInfo();
+        }
+      } catch (err) {
+        loadInfo();
+      }
+    }
+  }
+
+  init();
 })();
-
-  // Phone QR Modal logic
-  const btnPhoneQr = document.getElementById('btn-phone-qr');
-  const qrModal = document.getElementById('qr-modal');
-  const qrModalClose = document.getElementById('qr-modal-close');
-  const qrModalBackdrop = qrModal.querySelector('.modal-backdrop');
-  const qrUrlDisplay = document.getElementById('qr-url-display');
-  const btnCopyUrl = document.getElementById('btn-copy-url');
-
-  let currentMobileUrl = '';
-
-  function openQrModal() {
-    qrModal.classList.add('active');
-  }
-
-  function closeQrModal() {
-    qrModal.classList.remove('active');
-  }
-
-  btnPhoneQr.addEventListener('click', openQrModal);
-  qrModalClose.addEventListener('click', closeQrModal);
-  qrModalBackdrop.addEventListener('click', closeQrModal);
-
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      if (qrModal.classList.contains('active')) closeQrModal();
-      if (lightbox.classList.contains('active')) closeLightbox();
-    }
-  });
-
-  btnCopyUrl.addEventListener('click', async () => {
-    if (!currentMobileUrl) return;
-    try {
-      await navigator.clipboard.writeText(currentMobileUrl);
-      btnCopyUrl.textContent = 'Copied!';
-      setTimeout(() => btnCopyUrl.textContent = 'Copy', 2000);
-      showToast('Network URL copied to clipboard');
-    } catch (err) {
-      showToast('Could not copy to clipboard', 'error');
-    }
-  });
-
-  // Enhance loadInfo to store mobile_url
-  const origLoadInfo = loadInfo;
-  loadInfo = async function() {
-    try {
-      const res = await fetch('/api/info');
-      if (!res.ok) throw new Error('Failed to fetch info');
-      const data = await res.json();
-
-      hostnameDisplay.textContent = data.hostname || 'localhost';
-      dirDisplay.textContent = data.dir || '.';
-      isOnceMode = !!data.once;
-      currentMobileUrl = data.mobile_url || window.location.href;
-      qrUrlDisplay.textContent = currentMobileUrl;
-
-      if (data.title) {
-        sessionTitle.textContent = data.title;
-        sessionTitle.classList.remove('hidden');
-      }
-
-      if (isOnceMode) {
-        connectionStatus.className = 'status-pill once-mode';
-        connectionStatus.querySelector('.status-text').textContent = 'One-Shot';
-      }
-    } catch (err) {
-      connectionStatus.className = 'status-pill';
-      connectionStatus.querySelector('.status-text').textContent = 'Offline';
-    }
-  };

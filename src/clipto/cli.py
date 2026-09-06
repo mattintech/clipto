@@ -11,6 +11,7 @@ from clipto import __version__
 from clipto.server import CliptoHTTPServer, CliptoRequestHandler
 from clipto.utils import (
     find_available_port,
+    generate_pin,
     get_local_ip,
     get_tailscale_ip,
     render_qr_terminal,
@@ -68,6 +69,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Display a terminal QR code for the network URL (easy mobile phone scanning).",
     )
     parser.add_argument(
+        "--pin",
+        action="store_true",
+        help="Protect access with an auto-generated 4-digit PIN.",
+    )
+    parser.add_argument(
+        "--pass", "--password",
+        dest="password",
+        type=str,
+        default=None,
+        help="Protect access with a custom password/passphrase.",
+    )
+    parser.add_argument(
         "--host",
         type=str,
         default="0.0.0.0",
@@ -82,15 +95,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def get_mobile_url(port: int) -> str:
+def get_mobile_url(port: int, auth_token: Optional[str] = None) -> str:
     """Determine best URL for mobile access (Tailscale > LAN > Localhost)."""
     tailscale_ip = get_tailscale_ip()
     if tailscale_ip:
-        return f"http://{tailscale_ip}:{port}"
-    lan_ip = get_local_ip()
-    if lan_ip and lan_ip != "127.0.0.1":
-        return f"http://{lan_ip}:{port}"
-    return f"http://localhost:{port}"
+        base = f"http://{tailscale_ip}:{port}"
+    else:
+        lan_ip = get_local_ip()
+        if lan_ip and lan_ip != "127.0.0.1":
+            base = f"http://{lan_ip}:{port}"
+        else:
+            base = f"http://localhost:{port}"
+
+    if auth_token:
+        return f"{base}/?k={auth_token}"
+    return base
 
 
 def print_banner(
@@ -99,8 +118,10 @@ def print_banner(
     title: Optional[str] = None,
     once: bool = False,
     show_qr: bool = False,
+    auth_token: Optional[str] = None,
 ):
-    local_url = f"http://localhost:{port}"
+    query_suffix = f"/?k={auth_token}" if auth_token else ""
+    local_url = f"http://localhost:{port}{query_suffix}"
     lan_ip = get_local_ip()
     tailscale_ip = get_tailscale_ip()
 
@@ -110,12 +131,16 @@ def print_banner(
     ]
     if title:
         lines.append(f"Session:   {title}")
+    if auth_token:
+        lines.append(f"PIN / Key: {auth_token} 🔒")
 
     lines.append(f"Local:     {terminal_hyperlink(local_url)}")
     if lan_ip and lan_ip != "127.0.0.1":
-        lines.append(f"Network:   {terminal_hyperlink(f'http://{lan_ip}:{port}')}")
+        lan_url = f"http://{lan_ip}:{port}{query_suffix}"
+        lines.append(f"Network:   {terminal_hyperlink(lan_url)}")
     if tailscale_ip:
-        lines.append(f"Tailscale: {terminal_hyperlink(f'http://{tailscale_ip}:{port}')}")
+        tail_url = f"http://{tailscale_ip}:{port}{query_suffix}"
+        lines.append(f"Tailscale: {terminal_hyperlink(tail_url)}")
 
     max_w = max(visible_width(line) for line in lines)
     border = "─" * (max_w + 4)
@@ -127,7 +152,7 @@ def print_banner(
     print(f"└{border}┘", file=sys.stderr)
 
     if show_qr:
-        mobile_url = get_mobile_url(port)
+        mobile_url = get_mobile_url(port, auth_token=auth_token)
         qr_ascii = render_qr_terminal(mobile_url)
         print(f"\nScan with your phone to open ({mobile_url}):\n{qr_ascii}\n", file=sys.stderr)
     else:
@@ -142,6 +167,13 @@ def main():
 
     target_dir = args.dir.resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
+
+    # Determine auth token if requested
+    auth_token = None
+    if args.password:
+        auth_token = args.password.strip()
+    elif args.pin:
+        auth_token = generate_pin()
 
     # Determine port
     if args.no_hunt:
@@ -160,15 +192,24 @@ def main():
             upload_dir=target_dir,
             title=args.title,
             once=args.once,
+            auth_token=auth_token,
         )
     except OSError as e:
         print(f"Error binding to port {port}: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print_banner(port, target_dir, title=args.title, once=args.once, show_qr=args.qr)
+    print_banner(
+        port,
+        target_dir,
+        title=args.title,
+        once=args.once,
+        show_qr=args.qr,
+        auth_token=auth_token,
+    )
 
     if args.open:
-        webbrowser.open(f"http://localhost:{port}")
+        query_suffix = f"/?k={auth_token}" if auth_token else ""
+        webbrowser.open(f"http://localhost:{port}{query_suffix}")
 
     # Start server thread
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)

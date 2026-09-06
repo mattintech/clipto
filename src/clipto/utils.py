@@ -179,3 +179,9 @@ def render_qr_svg(url: str, border: int = 2) -> str:
         f'<path fill="#0f172a" d="{path_data}"/>'
         f"</svg>"
     )
+import secrets
+
+
+def generate_pin() -> str:
+    """Generate a random cryptographically secure 4-digit PIN."""
+    return f"{secrets.randbelow(9000) + 1000}"

@@ -8,7 +8,26 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'><path d='M19 3h-4.18C14.4 1.84 13.3 1 12 1c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 16H5V5h2v2h10V5h2v14z'/></svg>">
 </head>
 <body>
-  <div class="app-container">
+  <!-- Lock Screen Overlay (hidden by default unless auth required) -->
+  <div id="lock-screen" class="lock-screen hidden">
+    <div class="lock-card card">
+      <div class="lock-icon">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        </svg>
+      </div>
+      <h2>Protected Session</h2>
+      <p class="lock-subtitle">Enter the PIN or password from your terminal to connect</p>
+      <form id="auth-form" class="auth-form" onsubmit="return false;">
+        <input type="password" id="auth-input" class="auth-input" placeholder="Enter PIN or Password" autocomplete="current-password" autofocus>
+        <button type="submit" id="btn-unlock" class="btn btn-primary">Unlock</button>
+      </form>
+      <div id="auth-error" class="auth-error hidden"></div>
+    </div>
+  </div>
+
+  <div id="app-container" class="app-container">
     <!-- Header -->
     <header class="header">
       <div class="brand">
