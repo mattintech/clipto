@@ -1229,7 +1229,7 @@
         sessionTitle.classList.remove('hidden');
       }
 
-      if (isOnceMode) {
+      if (isOnceMode && connectionStatus) {
         connectionStatus.className = 'status-pill once-mode';
         connectionStatus.querySelector('.status-text').textContent = 'One-Shot';
       }
@@ -1261,8 +1261,10 @@
       }
       await loadFiles();
     } catch (err) {
-      connectionStatus.className = 'status-pill';
-      connectionStatus.querySelector('.status-text').textContent = 'Offline';
+      if (connectionStatus) {
+        connectionStatus.className = 'status-pill';
+        connectionStatus.querySelector('.status-text').textContent = 'Offline';
+      }
     }
   }
 
@@ -1307,8 +1309,10 @@
 
       if (isOnceMode) {
         showToast('One-shot received! Server is shutting down.', 'info');
-        connectionStatus.className = 'status-pill';
-        connectionStatus.querySelector('.status-text').textContent = 'Completed';
+        if (connectionStatus) {
+          connectionStatus.className = 'status-pill';
+          connectionStatus.querySelector('.status-text').textContent = 'Completed';
+        }
       }
     } catch (err) {
       console.error(err);
