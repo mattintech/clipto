@@ -132,3 +132,20 @@ class TestCliptoServer(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_file_download_and_traversal_prevention(self):
+        # Create a test file
+        test_file = self.temp_dir / "preview.png"
+        test_file.write_bytes(b"PNG_BYTES")
+
+        # Test valid download
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/file?name=preview.png") as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(resp.read(), b"PNG_BYTES")
+
+        # Test traversal attack prevention
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{self.port}/api/file?name=../../etc/passwd")
+            urllib.request.urlopen(req)
+        except urllib.error.HTTPError as e:
+            self.assertIn(e.code, [400, 403, 404])

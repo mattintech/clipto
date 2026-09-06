@@ -317,7 +317,13 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
+}
+
+.uploads-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .uploads-header h3 {
@@ -325,7 +331,40 @@ body {
   font-weight: 600;
 }
 
-.uploads-list {
+/* View Mode Toggles */
+.view-toggles {
+  display: flex;
+  background-color: #0f172a;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  gap: 2px;
+}
+
+.view-toggle-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.view-toggle-btn:hover {
+  color: var(--text-main);
+}
+
+.view-toggle-btn.active {
+  background-color: var(--bg-card);
+  color: var(--primary);
+}
+
+/* Uploads List Mode */
+.uploads-list.list-view {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -335,7 +374,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
+  padding: 8px 14px;
   background-color: #0f172a;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -354,7 +393,32 @@ body {
   overflow: hidden;
 }
 
-.upload-icon {
+.thumb-preview {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: #1e293b;
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.thumb-preview:hover {
+  transform: scale(1.08);
+  border-color: var(--primary);
+}
+
+.thumb-icon-placeholder {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  background: #1e293b;
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--primary);
   flex-shrink: 0;
 }
@@ -378,11 +442,139 @@ body {
   color: var(--text-muted);
 }
 
+/* Uploads Grid / Thumbnail Mode */
+.uploads-list.grid-view {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.grid-card {
+  background-color: #0f172a;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.2s, transform 0.2s;
+  animation: fadeIn 0.3s ease;
+}
+
+.grid-card:hover {
+  border-color: var(--primary);
+  transform: translateY(-2px);
+}
+
+.grid-card-media {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16/10;
+  background: #1e293b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.grid-card-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.2s ease;
+}
+
+.grid-card-media:hover img {
+  transform: scale(1.05);
+}
+
+.grid-card-body {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.grid-card-name {
+  font-size: 0.85rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.grid-card-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: space-between;
+}
+
 .empty-state {
+  grid-column: 1 / -1;
   text-align: center;
   padding: 24px 0;
   color: var(--text-muted);
   font-size: 0.88rem;
+}
+
+/* Lightbox Modal */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.lightbox.active {
+  display: flex;
+}
+
+.lightbox-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+}
+
+.lightbox-container {
+  position: relative;
+  z-index: 10;
+  max-width: 90vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.lightbox-img {
+  max-width: 90vw;
+  max-height: 80vh;
+  border-radius: var(--radius-md);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.7);
+  border: 1px solid var(--border-color);
+  object-fit: contain;
+}
+
+.lightbox-caption {
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-family: monospace;
+}
+
+.lightbox-close {
+  position: absolute;
+  top: -36px;
+  right: 0;
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 4px 8px;
 }
 
 /* Toasts */

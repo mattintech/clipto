@@ -11,9 +11,19 @@
   const uploadsList = document.getElementById('uploads-list');
   const uploadCountBadge = document.getElementById('upload-count');
   const toastContainer = document.getElementById('toast-container');
+  const btnViewList = document.getElementById('btn-view-list');
+  const btnViewGrid = document.getElementById('btn-view-grid');
+
+  // Lightbox elements
+  const lightbox = document.getElementById('lightbox');
+  const lightboxImg = document.getElementById('lightbox-img');
+  const lightboxCaption = document.getElementById('lightbox-caption');
+  const lightboxClose = document.getElementById('lightbox-close');
+  const lightboxBackdrop = lightbox.querySelector('.lightbox-backdrop');
 
   let uploadedItems = [];
   let isOnceMode = false;
+  let currentViewMode = localStorage.getItem('clipto_view_mode') || 'grid'; // Default to thumbnail grid!
 
   // Sound chime via Web Audio API (zero external assets)
   function playSuccessChime() {
@@ -31,7 +41,7 @@
       osc.start();
       osc.stop(ctx.currentTime + 0.3);
     } catch (e) {
-      // Audio context might be restricted before interaction
+      // Audio context might be restricted before user interaction
     }
   }
 
@@ -49,6 +59,144 @@
       setTimeout(() => toast.remove(), 300);
     }, 4000);
   }
+
+  // Format file size
+  function formatSize(bytes) {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  }
+
+  // Lightbox functions
+  function openLightbox(imageUrl, title) {
+    lightboxImg.src = imageUrl;
+    lightboxCaption.textContent = title;
+    lightbox.classList.add('active');
+  }
+
+  function closeLightbox() {
+    lightbox.classList.remove('active');
+    lightboxImg.src = '';
+  }
+
+  lightboxClose.addEventListener('click', closeLightbox);
+  lightboxBackdrop.addEventListener('click', closeLightbox);
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && lightbox.classList.contains('active')) {
+      closeLightbox();
+    }
+  });
+
+  // Render uploads list/grid
+  function renderUploads() {
+    uploadCountBadge.textContent = `${uploadedItems.length} item${uploadedItems.length === 1 ? '' : 's'}`;
+
+    if (uploadedItems.length === 0) {
+      uploadsList.innerHTML = '<div class="empty-state">No files uploaded yet in this session.</div>';
+      return;
+    }
+
+    uploadsList.innerHTML = '';
+    uploadsList.className = `uploads-list ${currentViewMode}-view`;
+
+    uploadedItems.forEach((item) => {
+      const fileUrl = `/api/file?name=${encodeURIComponent(item.name)}`;
+      const isImg = item.is_image;
+
+      if (currentViewMode === 'grid') {
+        // Thumbnail Card View
+        const card = document.createElement('div');
+        card.className = 'grid-card';
+
+        let mediaHtml = '';
+        if (isImg) {
+          mediaHtml = `
+            <div class="grid-card-media" title="Click to enlarge">
+              <img src="${fileUrl}" alt="${item.name}" loading="lazy">
+            </div>
+          `;
+        } else {
+          mediaHtml = `
+            <div class="grid-card-media">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+            </div>
+          `;
+        }
+
+        card.innerHTML = `
+          ${mediaHtml}
+          <div class="grid-card-body">
+            <span class="grid-card-name" title="${item.name}">${item.name}</span>
+            <div class="grid-card-meta">
+              <span>${formatSize(item.size)}</span>
+              <span>${item.time}</span>
+            </div>
+          </div>
+        `;
+
+        if (isImg) {
+          card.querySelector('.grid-card-media').addEventListener('click', () => {
+            openLightbox(fileUrl, item.name);
+          });
+        }
+
+        uploadsList.appendChild(card);
+      } else {
+        // List View
+        const row = document.createElement('div');
+        row.className = 'upload-item';
+
+        let thumbHtml = '';
+        if (isImg) {
+          thumbHtml = `<img class="thumb-preview" src="${fileUrl}" alt="${item.name}" title="Click to enlarge">`;
+        } else {
+          thumbHtml = `
+            <div class="thumb-icon-placeholder">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+            </div>
+          `;
+        }
+
+        row.innerHTML = `
+          <div class="upload-item-left">
+            ${thumbHtml}
+            <div class="upload-item-info">
+              <span class="upload-item-name" title="${item.name}">${item.name}</span>
+              <span class="upload-item-meta">${formatSize(item.size)} • ${item.time}</span>
+            </div>
+          </div>
+          <span class="badge" style="color: var(--success); border-color: rgba(16, 185, 129, 0.3);">Saved</span>
+        `;
+
+        if (isImg) {
+          row.querySelector('.thumb-preview').addEventListener('click', () => {
+            openLightbox(fileUrl, item.name);
+          });
+        }
+
+        uploadsList.appendChild(row);
+      }
+    });
+  }
+
+  // View toggle handlers
+  function setViewMode(mode) {
+    currentViewMode = mode;
+    localStorage.setItem('clipto_view_mode', mode);
+    if (mode === 'grid') {
+      btnViewGrid.classList.add('active');
+      btnViewList.classList.remove('active');
+    } else {
+      btnViewList.classList.add('active');
+      btnViewGrid.classList.remove('active');
+    }
+    renderUploads();
+  }
+
+  btnViewList.addEventListener('click', () => setViewMode('list'));
+  btnViewGrid.addEventListener('click', () => setViewMode('grid'));
 
   // Fetch session info
   async function loadInfo() {
@@ -76,44 +224,6 @@
     }
   }
 
-  // Format file size
-  function formatSize(bytes) {
-    if (!bytes || bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-  }
-
-  // Add upload to recent list
-  function renderUploadItem(filename, size, isText = false) {
-    const empty = uploadsList.querySelector('.empty-state');
-    if (empty) empty.remove();
-
-    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const item = document.createElement('div');
-    item.className = 'upload-item';
-    item.innerHTML = `
-      <div class="upload-item-left">
-        <div class="upload-icon">
-          ${isText 
-            ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>'
-            : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>'
-          }
-        </div>
-        <div class="upload-item-info">
-          <span class="upload-item-name" title="${filename}">${filename}</span>
-          <span class="upload-item-meta">${formatSize(size)} • ${time}</span>
-        </div>
-      </div>
-      <span class="badge" style="color: var(--success); border-color: rgba(16, 185, 129, 0.3);">Saved</span>
-    `;
-
-    uploadsList.prepend(item);
-    uploadedItems.push(filename);
-    uploadCountBadge.textContent = `${uploadedItems.length} item${uploadedItems.length === 1 ? '' : 's'}`;
-  }
-
   // Upload formData to server
   async function uploadFormData(formData) {
     try {
@@ -132,10 +242,18 @@
       playSuccessChime();
 
       if (result.saved_files && result.saved_files.length > 0) {
+        const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         result.saved_files.forEach((file) => {
-          renderUploadItem(file.name, file.size, file.name.endsWith('.txt'));
+          uploadedItems.unshift({
+            name: file.name,
+            size: file.size,
+            is_image: file.is_image,
+            path: file.path,
+            time: now,
+          });
           showToast(`Saved ${file.name}`);
         });
+        renderUploads();
       }
 
       if (isOnceMode) {
@@ -263,5 +381,6 @@
   });
 
   // Initialize
+  setViewMode(currentViewMode);
   loadInfo();
 })();

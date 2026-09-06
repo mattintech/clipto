@@ -86,14 +86,34 @@
       <!-- Recent Uploads / Session History -->
       <div class="uploads-section card">
         <div class="uploads-header">
-          <h3>Recent Uploads</h3>
-          <span id="upload-count" class="badge">0 items</span>
+          <div class="uploads-header-left">
+            <h3>Recent Uploads</h3>
+            <span id="upload-count" class="badge">0 items</span>
+          </div>
+          <div class="view-toggles">
+            <button id="btn-view-list" class="view-toggle-btn active" title="List View">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+            </button>
+            <button id="btn-view-grid" class="view-toggle-btn" title="Thumbnail Grid View">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+            </button>
+          </div>
         </div>
-        <div id="uploads-list" class="uploads-list">
+        <div id="uploads-list" class="uploads-list list-view">
           <div class="empty-state">No files uploaded yet in this session.</div>
         </div>
       </div>
     </main>
+
+    <!-- Image Lightbox Modal -->
+    <div id="lightbox" class="lightbox">
+      <div class="lightbox-backdrop"></div>
+      <div class="lightbox-container">
+        <button id="lightbox-close" class="lightbox-close" title="Close (Esc)">✕</button>
+        <img id="lightbox-img" class="lightbox-img" src="" alt="Preview">
+        <div id="lightbox-caption" class="lightbox-caption"></div>
+      </div>
+    </div>
 
     <!-- Toast Notifications -->
     <div id="toast-container" class="toast-container"></div>

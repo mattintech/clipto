@@ -2,6 +2,7 @@ import json
 import mimetypes
 import socket
 import threading
+import urllib.parse
 from email.parser import BytesParser
 from email.policy import default
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -74,7 +75,8 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         web_dir = get_web_dir()
-        path = self.path.split("?")[0]
+        parsed_url = urllib.parse.urlparse(self.path)
+        path = parsed_url.path
 
         if path in ("/", "/index.html"):
             self.serve_file(web_dir / "index.html")
@@ -89,6 +91,28 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 "title": self.server.title,
                 "once": self.server.once,
             })
+        elif path == "/api/file":
+            query = urllib.parse.parse_qs(parsed_url.query)
+            filename = query.get("name", [None])[0]
+            if not filename:
+                self.send_error(400, "Missing file name")
+                return
+
+            safe_name = sanitize_filename(filename)
+            target = (self.server.upload_dir / safe_name).resolve()
+
+            # Prevent directory traversal attacks
+            try:
+                target.relative_to(self.server.upload_dir)
+            except ValueError:
+                self.send_error(403, "Forbidden")
+                return
+
+            if not target.is_file():
+                self.send_error(404, "File Not Found")
+                return
+
+            self.serve_file(target)
         elif path == "/api/health":
             self.send_json(200, {"status": "ok"})
         else:
@@ -129,6 +153,7 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                                 "name": target_path.name,
                                 "path": str(target_path.resolve()),
                                 "size": target_path.stat().st_size,
+                                "is_image": False,
                             })
                             self.server.uploaded_files.append(target_path)
                     continue
@@ -139,10 +164,12 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
 
                 if payload is not None:
                     target_path.write_bytes(payload)
+                    is_img = target_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
                     saved_results.append({
                         "name": target_path.name,
                         "path": str(target_path.resolve()),
                         "size": target_path.stat().st_size,
+                        "is_image": is_img,
                     })
                     self.server.uploaded_files.append(target_path)
 
