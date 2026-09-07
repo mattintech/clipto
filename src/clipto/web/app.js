@@ -1538,7 +1538,7 @@
   }
 
   // Upload large file in chunks directly to disk with live progress, speed/ETA, and resume support
-  async function uploadChunkedFile(file, isGist = false) {
+  async function uploadChunkedFile(file, isGist = false, existingItemEl = null, registerAbort = null) {
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
     const fingerprint = `${file.name}_${file.size}_${file.lastModified || 0}`;
     let uploadId = null;
@@ -1578,38 +1578,40 @@
     const abortController = new AbortController();
     let isCancelled = false;
 
-    // Create item in upload panel
-    uploadPanel.classList.remove('hidden');
-    const itemEl = document.createElement('div');
-    itemEl.className = 'upload-item';
-    itemEl.id = `upload-item-${uploadId}`;
-    itemEl.innerHTML = `
-      <div class="upload-item-header">
-        <div class="upload-item-name" title="${escapeHtml(file.name)}">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-          <span>${escapeHtml(file.name)}</span>
+    let itemEl = existingItemEl;
+    if (!itemEl) {
+      uploadPanel.classList.remove('hidden');
+      itemEl = document.createElement('div');
+      itemEl.className = 'upload-item';
+      itemEl.id = `upload-item-${uploadId}`;
+      itemEl.innerHTML = `
+        <div class="upload-item-header">
+          <div class="upload-item-name" title="${escapeHtml(file.name)}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+            <span>${escapeHtml(file.name)}</span>
+          </div>
+          <div class="upload-item-actions">
+            <button class="upload-item-cancel" title="Cancel upload">✕</button>
+          </div>
         </div>
-        <div class="upload-item-actions">
-          <button class="upload-item-cancel" title="Cancel upload">✕</button>
+        <div class="upload-item-bar-wrap">
+          <div class="upload-item-bar" style="width: 0%"></div>
         </div>
-      </div>
-      <div class="upload-item-bar-wrap">
-        <div class="upload-item-bar" style="width: 0%"></div>
-      </div>
-      <div class="upload-item-meta">
-        <span class="upload-item-progress">0 B / ${formatSize(file.size)} (0%)</span>
-        <span class="upload-item-speed">${isResumed ? `Resuming (${chunksReceived.size}/${totalChunks} chunks cached)...` : 'Starting...'}</span>
-      </div>
-    `;
-    uploadPanelList.prepend(itemEl);
-    updateUploadPanelHeader();
+        <div class="upload-item-meta">
+          <span class="upload-item-progress">0 B / ${formatSize(file.size)} (0%)</span>
+          <span class="upload-item-speed">${isResumed ? `Resuming (${chunksReceived.size}/${totalChunks} chunks cached)...` : 'Starting...'}</span>
+        </div>
+      `;
+      uploadPanelList.prepend(itemEl);
+      updateUploadPanelHeader();
+    }
 
     const barEl = itemEl.querySelector('.upload-item-bar');
     const progressEl = itemEl.querySelector('.upload-item-progress');
     const speedEl = itemEl.querySelector('.upload-item-speed');
     const cancelBtn = itemEl.querySelector('.upload-item-cancel');
 
-    cancelBtn.addEventListener('click', async () => {
+    const cancelHandler = async () => {
       isCancelled = true;
       abortController.abort();
       try {
@@ -1622,9 +1624,16 @@
       } catch (_) {}
       itemEl.classList.add('failed');
       itemEl.querySelector('.upload-item-meta').innerHTML = '<span class="upload-item-status-error">✕ Cancelled</span>';
-      cancelBtn.remove();
+      if (cancelBtn) cancelBtn.remove();
       updateUploadPanelHeader();
-    });
+    };
+
+    if (registerAbort) {
+      registerAbort(cancelHandler);
+    }
+    if (cancelBtn) {
+      cancelBtn.onclick = cancelHandler;
+    }
 
     const startTime = Date.now();
     let lastTime = startTime;
@@ -1700,8 +1709,8 @@
           bytesUploadedSoFar += chunkBlob.size;
 
           const now = Date.now();
-          const dt = (now - lastTime) / 1000;
-          if (dt > 0.15) {
+          const dt = (now - t0) / 1000;
+          if (dt > 0.05) {
             const instantSpeed = chunkBlob.size / (dt || 0.001);
             rollingSpeed = rollingSpeed === 0 ? instantSpeed : (rollingSpeed * 0.7 + instantSpeed * 0.3);
             lastTime = now;
@@ -1804,36 +1813,39 @@
   }
 
   // Upload small file directly with live progress tracking, speed, and cancel support
-  function uploadSmallFile(file, isGist = false) {
+  function uploadSmallFile(file, isGist = false, existingItemEl = null, registerAbort = null) {
     return new Promise((resolve, reject) => {
       const uploadId = (window.crypto && crypto.getRandomValues)
         ? Array.from(crypto.getRandomValues(new Uint8Array(8))).map((b) => b.toString(16).padStart(2, '0')).join('')
         : 'sf_' + Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
 
-      uploadPanel.classList.remove('hidden');
-      const itemEl = document.createElement('div');
-      itemEl.className = 'upload-item';
-      itemEl.id = `upload-item-${uploadId}`;
-      itemEl.innerHTML = `
-        <div class="upload-item-header">
-          <div class="upload-item-name" title="${escapeHtml(file.name)}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-            <span>${escapeHtml(file.name)}</span>
+      let itemEl = existingItemEl;
+      if (!itemEl) {
+        uploadPanel.classList.remove('hidden');
+        itemEl = document.createElement('div');
+        itemEl.className = 'upload-item';
+        itemEl.id = `upload-item-${uploadId}`;
+        itemEl.innerHTML = `
+          <div class="upload-item-header">
+            <div class="upload-item-name" title="${escapeHtml(file.name)}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+              <span>${escapeHtml(file.name)}</span>
+            </div>
+            <div class="upload-item-actions">
+              <button class="upload-item-cancel" title="Cancel upload">✕</button>
+            </div>
           </div>
-          <div class="upload-item-actions">
-            <button class="upload-item-cancel" title="Cancel upload">✕</button>
+          <div class="upload-item-bar-wrap">
+            <div class="upload-item-bar" style="width: 0%"></div>
           </div>
-        </div>
-        <div class="upload-item-bar-wrap">
-          <div class="upload-item-bar" style="width: 0%"></div>
-        </div>
-        <div class="upload-item-meta">
-          <span class="upload-item-progress">0 B / ${formatSize(file.size)} (0%)</span>
-          <span class="upload-item-speed">Starting...</span>
-        </div>
-      `;
-      uploadPanelList.prepend(itemEl);
-      updateUploadPanelHeader();
+          <div class="upload-item-meta">
+            <span class="upload-item-progress">0 B / ${formatSize(file.size)} (0%)</span>
+            <span class="upload-item-speed">Starting...</span>
+          </div>
+        `;
+        uploadPanelList.prepend(itemEl);
+        updateUploadPanelHeader();
+      }
 
       const barEl = itemEl.querySelector('.upload-item-bar');
       const progressEl = itemEl.querySelector('.upload-item-progress');
@@ -1845,14 +1857,21 @@
       let lastTime = startTime;
       let rollingSpeed = 0;
 
-      cancelBtn.addEventListener('click', () => {
+      const cancelHandler = () => {
         xhr.abort();
         itemEl.classList.add('failed');
         itemEl.querySelector('.upload-item-meta').innerHTML = '<span class="upload-item-status-error">✕ Cancelled</span>';
-        cancelBtn.remove();
+        if (cancelBtn) cancelBtn.remove();
         updateUploadPanelHeader();
         reject(new Error('Upload cancelled'));
-      });
+      };
+
+      if (registerAbort) {
+        registerAbort(cancelHandler);
+      }
+      if (cancelBtn) {
+        cancelBtn.onclick = cancelHandler;
+      }
 
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
@@ -1966,23 +1985,117 @@
     });
   }
 
+  // Concurrency-controlled Upload Queue (Max 3 active uploads simultaneously)
+  const MAX_CONCURRENT_UPLOADS = 3;
+  let activeUploadsCount = 0;
+  const pendingUploadQueue = [];
+
+  function enqueueUpload(file, isGist = false) {
+    return new Promise((resolve, reject) => {
+      uploadPanel.classList.remove('hidden');
+      const taskId = (window.crypto && crypto.getRandomValues)
+        ? Array.from(crypto.getRandomValues(new Uint8Array(8))).map((b) => b.toString(16).padStart(2, '0')).join('')
+        : 'up_' + Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
+
+      const isQueued = activeUploadsCount >= MAX_CONCURRENT_UPLOADS;
+
+      const itemEl = document.createElement('div');
+      itemEl.className = 'upload-item';
+      itemEl.id = `upload-item-${taskId}`;
+      itemEl.innerHTML = `
+        <div class="upload-item-header">
+          <div class="upload-item-name" title="${escapeHtml(file.name)}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+            <span>${escapeHtml(file.name)}</span>
+          </div>
+          <div class="upload-item-actions">
+            <button class="upload-item-cancel" title="Cancel upload">✕</button>
+          </div>
+        </div>
+        <div class="upload-item-bar-wrap">
+          <div class="upload-item-bar" style="width: 0%"></div>
+        </div>
+        <div class="upload-item-meta">
+          <span class="upload-item-progress">0 B / ${formatSize(file.size)} (0%)</span>
+          <span class="upload-item-speed">${isQueued ? 'Queued' : 'Starting...'}</span>
+        </div>
+      `;
+      uploadPanelList.prepend(itemEl);
+      updateUploadPanelHeader();
+
+      const task = {
+        taskId,
+        file,
+        isGist,
+        itemEl,
+        cancelled: false,
+        abortFn: null,
+        resolve,
+        reject,
+      };
+
+      const cancelBtn = itemEl.querySelector('.upload-item-cancel');
+      if (cancelBtn) {
+        cancelBtn.onclick = () => {
+          task.cancelled = true;
+          if (task.abortFn) {
+            task.abortFn();
+          } else {
+            const idx = pendingUploadQueue.indexOf(task);
+            if (idx !== -1) pendingUploadQueue.splice(idx, 1);
+            itemEl.classList.add('failed');
+            itemEl.querySelector('.upload-item-meta').innerHTML = '<span class="upload-item-status-error">✕ Cancelled</span>';
+            cancelBtn.remove();
+            updateUploadPanelHeader();
+            reject(new Error('Upload cancelled'));
+          }
+        };
+      }
+
+      pendingUploadQueue.push(task);
+      pumpUploadQueue();
+    });
+  }
+
+  function pumpUploadQueue() {
+    while (activeUploadsCount < MAX_CONCURRENT_UPLOADS && pendingUploadQueue.length > 0) {
+      const task = pendingUploadQueue.shift();
+      if (task.cancelled) continue;
+
+      activeUploadsCount++;
+      const speedEl = task.itemEl.querySelector('.upload-item-speed');
+      if (speedEl && speedEl.textContent === 'Queued') {
+        speedEl.textContent = 'Starting...';
+      }
+
+      const runner = task.file.size > CHUNK_SIZE
+        ? uploadChunkedFile(task.file, task.isGist, task.itemEl, (abort) => { task.abortFn = abort; })
+        : uploadSmallFile(task.file, task.isGist, task.itemEl, (abort) => { task.abortFn = abort; });
+
+      runner
+        .then((res) => task.resolve(res))
+        .catch((err) => task.reject(err))
+        .finally(() => {
+          activeUploadsCount = Math.max(0, activeUploadsCount - 1);
+          updateUploadPanelHeader();
+          pumpUploadQueue();
+        });
+    }
+    updateUploadPanelHeader();
+  }
+
   // Handle files (from input or drop)
   async function handleFiles(files) {
     if (!files || files.length === 0) return;
     const fileList = Array.from(files);
 
     for (const file of fileList) {
-      if (file.size > CHUNK_SIZE) {
-        uploadChunkedFile(file).catch((err) => {
+      enqueueUpload(file).catch((err) => {
+        if (err && err.message !== 'Upload cancelled') {
           console.error(err);
           showToast(`Upload failed for ${file.name}: ${err.message}`, 'error');
-        });
-      } else {
-        uploadSmallFile(file).catch((err) => {
-          console.error(err);
-          showToast(`Upload failed for ${file.name}: ${err.message}`, 'error');
-        });
-      }
+        }
+      });
     }
   }
 
@@ -2011,11 +2124,12 @@
             const filename = `clip_${dateStr}_${timeStr}.png`;
 
             const fileFromBlob = new File([blob], filename, { type: blob.type });
-            if (blob.size > CHUNK_SIZE) {
-              uploadChunkedFile(fileFromBlob);
-            } else {
-              uploadSmallFile(fileFromBlob);
-            }
+            enqueueUpload(fileFromBlob).catch((err) => {
+              if (err && err.message !== 'Upload cancelled') {
+                console.error(err);
+                showToast(`Upload failed for ${fileFromBlob.name}: ${err.message}`, 'error');
+              }
+            });
             break;
           }
         }
