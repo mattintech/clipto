@@ -104,6 +104,21 @@ class CliptoHTTPServer(ThreadingHTTPServer):
         self.authenticated_sessions: Set[str] = set()
         self.auth_lock = threading.Lock()
 
+    def is_rate_limited(self, client_ip: str) -> bool:
+        """Check if an IP has exceeded failed authentication threshold (5 attempts / min)."""
+        now = time.time()
+        with self.auth_lock:
+            self.failed_auth_attempts[client_ip] = [
+                t for t in self.failed_auth_attempts[client_ip] if now - t < 60
+            ]
+            return len(self.failed_auth_attempts[client_ip]) >= 5
+
+    def record_failed_auth(self, client_ip: str) -> None:
+        """Record a failed auth attempt for rate limiting."""
+        now = time.time()
+        with self.auth_lock:
+            self.failed_auth_attempts[client_ip].append(now)
+
     def finish_request(self, request, client_address):
         if not self.is_ssl or not self.ssl_context:
             super().finish_request(request, client_address)
@@ -236,38 +251,57 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
         if not self.server.auth_token and not self.server.totp_secret:
             return True
 
+        client_ip = self.client_address[0]
+        if self.server.is_rate_limited(client_ip):
+            self._rate_limited = True
+            return False
+
+        self._rate_limited = False
+        credential_provided = False
+        credential_valid = False
+
         # 1. Check Cookie: clipto_auth
         cookie_header = self.headers.get("Cookie", "")
         cookies = http.cookies.SimpleCookie(cookie_header)
         if "clipto_auth" in cookies:
+            credential_provided = True
             cookie_val = cookies["clipto_auth"].value
             with self.server.auth_lock:
                 if cookie_val in self.server.authenticated_sessions:
-                    return True
-            if self.server.auth_token and hmac.compare_digest(cookie_val, self.server.auth_token):
-                return True
+                    credential_valid = True
+            if not credential_valid and self.server.auth_token and hmac.compare_digest(cookie_val, self.server.auth_token):
+                credential_valid = True
 
         # 2. Check Query parameter: ?k=...
         parsed = urllib.parse.urlparse(self.path)
         query = urllib.parse.parse_qs(parsed.query)
-        if "k" in query:
+        if not credential_valid and "k" in query:
+            credential_provided = True
             k = query["k"][0].strip()
             if self.server.totp_secret and verify_totp(self.server.totp_secret, k):
-                return True
-            if self.server.auth_token and hmac.compare_digest(k, self.server.auth_token):
-                return True
+                credential_valid = True
+            elif self.server.auth_token and hmac.compare_digest(k, self.server.auth_token):
+                credential_valid = True
 
         # 3. Check Authorization header: Bearer <token>
         auth_header = self.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
+        if not credential_valid and auth_header.startswith("Bearer "):
+            credential_provided = True
             token = auth_header[7:].strip()
             with self.server.auth_lock:
                 if token in self.server.authenticated_sessions:
-                    return True
-            if self.server.totp_secret and verify_totp(self.server.totp_secret, token):
-                return True
-            if self.server.auth_token and hmac.compare_digest(token, self.server.auth_token):
-                return True
+                    credential_valid = True
+            if not credential_valid and self.server.totp_secret and verify_totp(self.server.totp_secret, token):
+                credential_valid = True
+            elif not credential_valid and self.server.auth_token and hmac.compare_digest(token, self.server.auth_token):
+                credential_valid = True
+
+        if credential_valid:
+            return True
+
+        # If an invalid credential was explicitly submitted, record the failure for rate limiting
+        if credential_provided:
+            self.server.record_failed_auth(client_ip)
 
         return False
 
@@ -332,6 +366,9 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
 
         # Protected API endpoints
         if not self.is_authenticated():
+            if getattr(self, "_rate_limited", False):
+                self.send_json(429, {"error": "Too many failed attempts. Please wait 1 minute."})
+                return
             self.send_json(401, {"error": "Authentication required", "auth_required": True})
             return
 
@@ -436,12 +473,30 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 self.send_error(400, "Missing file name")
                 return
 
+            if filename.strip().startswith("."):
+                self.send_error(403, "Forbidden")
+                return
+
             safe_name = sanitize_filename(filename)
+            if safe_name.startswith("."):
+                self.send_error(403, "Forbidden")
+                return
+
+            if self.server.share_file:
+                allowed_names = {self.server.share_file.name} | set(self.server.load_gists())
+                if safe_name not in allowed_names:
+                    self.send_error(403, "Forbidden")
+                    return
+
             target = (self.server.upload_dir / safe_name).resolve()
 
             try:
                 target.relative_to(self.server.upload_dir)
             except ValueError:
+                self.send_error(403, "Forbidden")
+                return
+
+            if target.name.startswith("."):
                 self.send_error(403, "Forbidden")
                 return
 
@@ -480,12 +535,30 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 self.send_error(400, "Missing file name for raw download")
                 return
 
+            if raw_target_name.strip().startswith("."):
+                self.send_error(403, "Forbidden")
+                return
+
             safe_name = sanitize_filename(raw_target_name)
+            if safe_name.startswith("."):
+                self.send_error(403, "Forbidden")
+                return
+
+            if self.server.share_file:
+                allowed_names = {self.server.share_file.name} | set(self.server.load_gists())
+                if safe_name not in allowed_names:
+                    self.send_error(403, "Forbidden")
+                    return
+
             target = (self.server.upload_dir / safe_name).resolve()
 
             try:
                 target.relative_to(self.server.upload_dir)
             except ValueError:
+                self.send_error(403, "Forbidden")
+                return
+
+            if target.name.startswith("."):
                 self.send_error(403, "Forbidden")
                 return
 
@@ -517,13 +590,31 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 self.send_error(400, "Missing file name")
                 return
 
+            if filename.strip().startswith("."):
+                self.send_error(403, "Forbidden")
+                return
+
             safe_name = sanitize_filename(filename)
+            if safe_name.startswith("."):
+                self.send_error(403, "Forbidden")
+                return
+
+            if self.server.share_file:
+                allowed_names = {self.server.share_file.name} | set(self.server.load_gists())
+                if safe_name not in allowed_names:
+                    self.send_error(403, "Forbidden")
+                    return
+
             target = (self.server.upload_dir / safe_name).resolve()
 
             # Prevent directory traversal attacks
             try:
                 target.relative_to(self.server.upload_dir)
             except ValueError:
+                self.send_error(403, "Forbidden")
+                return
+
+            if target.name.startswith("."):
                 self.send_error(403, "Forbidden")
                 return
 
@@ -539,16 +630,7 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
         # Auth verification endpoint
         if self.path == "/api/auth":
             client_ip = self.client_address[0]
-            now = time.time()
-
-            # Rate-limiting brute force check
-            with self.server.auth_lock:
-                self.server.failed_auth_attempts[client_ip] = [
-                    t for t in self.server.failed_auth_attempts[client_ip] if now - t < 60
-                ]
-                recent_failures = len(self.server.failed_auth_attempts[client_ip])
-
-            if recent_failures >= 5:
+            if self.server.is_rate_limited(client_ip):
                 self.send_json(429, {"error": "Too many failed attempts. Please wait 1 minute."})
                 return
 
@@ -575,8 +657,7 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                     cookie_val = f"clipto_auth={session_token}; Path=/; SameSite=Strict; HttpOnly"
                     self.send_json(200, {"status": "ok", "authenticated": True}, cookie=cookie_val)
                 else:
-                    with self.server.auth_lock:
-                        self.server.failed_auth_attempts[client_ip].append(now)
+                    self.server.record_failed_auth(client_ip)
                     err_msg = "Invalid 6-digit authenticator code" if self.server.totp_secret else "Incorrect PIN or password"
                     self.send_json(401, {"error": err_msg, "authenticated": False})
             except Exception as e:
@@ -585,7 +666,14 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
 
         # Gist creation endpoint requires authentication
         if self.path == "/api/gist":
+            if self.server.share_file:
+                self.send_json(403, {"error": "Gist creation disabled in single-file share mode"})
+                return
+
             if not self.is_authenticated():
+                if getattr(self, "_rate_limited", False):
+                    self.send_json(429, {"error": "Too many failed attempts. Please wait 1 minute."})
+                    return
                 self.send_json(401, {"error": "Authentication required", "auth_required": True})
                 return
 
@@ -595,6 +683,8 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 data = json.loads(body.decode("utf-8"))
                 raw_filename = (data.get("filename") or data.get("name") or "").strip()
                 filename = sanitize_filename(raw_filename, default_name="gist.txt")
+                if filename.startswith("."):
+                    filename = filename.lstrip(". ") or "gist.txt"
                 content = str(data.get("content", ""))
                 target_path = get_unique_path(self.server.upload_dir, filename)
                 target_path.write_text(content, encoding="utf-8")
@@ -618,6 +708,9 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
         # Configuration update endpoint requires authentication
         if self.path == "/api/config":
             if not self.is_authenticated():
+                if getattr(self, "_rate_limited", False):
+                    self.send_json(429, {"error": "Too many failed attempts. Please wait 1 minute."})
+                    return
                 self.send_json(401, {"error": "Authentication required", "auth_required": True})
                 return
 
@@ -631,13 +724,20 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": f"Failed to update config: {e}"})
             return
 
-        # Upload endpoint requires authentication
-        if not self.is_authenticated():
-            self.send_json(401, {"error": "Authentication required", "auth_required": True})
-            return
-
         if self.path != "/api/upload":
             self.send_error(404, "Not Found")
+            return
+
+        if self.server.share_file:
+            self.send_json(403, {"error": "Uploads disabled: server is in single-file share mode"})
+            return
+
+        # Upload endpoint requires authentication
+        if not self.is_authenticated():
+            if getattr(self, "_rate_limited", False):
+                self.send_json(429, {"error": "Too many failed attempts. Please wait 1 minute."})
+                return
+            self.send_json(401, {"error": "Authentication required", "auth_required": True})
             return
 
         content_type = self.headers.get("Content-Type", "")
@@ -686,6 +786,8 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                     continue
 
                 clean_name = sanitize_filename(filename, default_name="upload.bin")
+                if clean_name.startswith("."):
+                    clean_name = clean_name.lstrip(". ") or "upload.bin"
                 target_path = get_unique_path(self.server.upload_dir, clean_name)
                 payload = part.get_payload(decode=True)
 

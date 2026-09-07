@@ -86,11 +86,13 @@ def get_tailscale_ip() -> Optional[str]:
 
 
 def sanitize_filename(filename: str, default_name: str = "upload") -> str:
-    """Sanitize uploaded filenames to prevent path traversal and unsafe characters."""
+    """Sanitize uploaded filenames to prevent path traversal, hidden files, and unsafe characters."""
     filename = os.path.basename(filename).strip()
     filename = re.sub(r"[\x00-\x1f\x7f]", "", filename)
     filename = re.sub(r'[\\/:*?"<>|]', "_", filename)
+    filename = filename.strip(". ")
     return filename or default_name
+
 
 
 def get_unique_path(directory: Path, filename: str) -> Path:

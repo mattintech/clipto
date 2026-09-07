@@ -33,6 +33,12 @@ class TestCliptoUtils(unittest.TestCase):
         self.assertEqual(sanitize_filename("../../etc/passwd"), "passwd")
         self.assertEqual(sanitize_filename("bad*char?.jpg"), "bad_char_.jpg")
         self.assertEqual(sanitize_filename(""), "upload")
+        self.assertEqual(sanitize_filename(".."), "upload")
+        self.assertEqual(sanitize_filename("."), "upload")
+        self.assertEqual(sanitize_filename("..."), "upload")
+        self.assertEqual(sanitize_filename(".env"), "env")
+        self.assertEqual(sanitize_filename(".bashrc"), "bashrc")
+        self.assertEqual(sanitize_filename("photo.png."), "photo.png")
 
     def test_get_unique_path(self):
         f1 = get_unique_path(self.temp_dir, "test.txt")
@@ -729,6 +735,165 @@ class TestCliptoServer(unittest.TestCase):
         finally:
             ssl_server.shutdown()
             ssl_server.server_close()
+
+    def test_dotfile_access_protection(self):
+        env_file = self.temp_dir / ".env"
+        env_file.write_text("SECRET_KEY=123456")
+
+        hidden_file = self.temp_dir / ".hidden_notes.txt"
+        hidden_file.write_text("classified notes")
+
+        # 1. /api/content?name=.env -> 403 Forbidden
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/content?name=.env")
+            self.fail("Expected 403 for .env in /api/content")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 403)
+
+        # 2. /raw/.env -> 403 Forbidden
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{self.port}/raw/.env")
+            self.fail("Expected 403 for .env in /raw/")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 403)
+
+        # 3. /api/file?name=.hidden_notes.txt -> 403 Forbidden
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/file?name=.hidden_notes.txt")
+            self.fail("Expected 403 for .hidden_notes.txt in /api/file")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 403)
+
+    def test_single_file_share_isolation(self):
+        share_dir = Path(tempfile.mkdtemp())
+        share_port = find_available_port(0)
+        target_file = share_dir / "allowed.txt"
+        target_file.write_text("ALLOWED_CONTENT")
+        secret_file = share_dir / "secret.txt"
+        secret_file.write_text("TOP_SECRET_CONTENT")
+
+        server = CliptoHTTPServer(
+            ("127.0.0.1", share_port),
+            CliptoRequestHandler,
+            upload_dir=share_dir,
+            title="Single File Share",
+            once=False,
+            share_mode=True,
+            share_file=target_file,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        time.sleep(0.1)
+
+        try:
+            # 1. Allowed file should be accessible via /raw and /api/content
+            with urllib.request.urlopen(f"http://127.0.0.1:{share_port}/raw/{target_file.name}") as resp:
+                self.assertEqual(resp.status, 200)
+                self.assertEqual(resp.read().decode(), "ALLOWED_CONTENT")
+
+            with urllib.request.urlopen(f"http://127.0.0.1:{share_port}/api/content?name={target_file.name}") as resp:
+                self.assertEqual(resp.status, 200)
+                data = json.loads(resp.read().decode())
+                self.assertEqual(data["content"], "ALLOWED_CONTENT")
+
+            # 2. Secret sibling file should be forbidden via /raw, /api/content, /api/file
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{share_port}/raw/{secret_file.name}")
+                self.fail("Expected 403 for sibling file in /raw/")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 403)
+
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{share_port}/api/content?name={secret_file.name}")
+                self.fail("Expected 403 for sibling file in /api/content")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 403)
+
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{share_port}/api/file?name={secret_file.name}")
+                self.fail("Expected 403 for sibling file in /api/file")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 403)
+
+            # 3. POST /api/upload should be rejected with 403
+            req_upload = urllib.request.Request(
+                f"http://127.0.0.1:{share_port}/api/upload",
+                data=b"--boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"upload.txt\"\r\n\r\ntest\r\n--boundary--\r\n",
+                headers={"Content-Type": "multipart/form-data; boundary=boundary"},
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(req_upload)
+                self.fail("Expected 403 for upload in single-file share mode")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 403)
+
+            # 4. POST /api/gist should be rejected with 403
+            req_gist = urllib.request.Request(
+                f"http://127.0.0.1:{share_port}/api/gist",
+                data=json.dumps({"filename": "new.txt", "content": "hello"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(req_gist)
+                self.fail("Expected 403 for gist creation in single-file share mode")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 403)
+
+        finally:
+            server.shutdown()
+            server.server_close()
+            shutil.rmtree(share_dir, ignore_errors=True)
+
+    def test_auth_rate_limiting_across_vectors(self):
+        auth_dir = Path(tempfile.mkdtemp())
+        auth_port = find_available_port(0)
+        auth_server = CliptoHTTPServer(
+            ("127.0.0.1", auth_port),
+            CliptoRequestHandler,
+            upload_dir=auth_dir,
+            title="Rate Limit Test",
+            once=False,
+            auth_token="secret_pin",
+        )
+        thread = threading.Thread(target=auth_server.serve_forever, daemon=True)
+        thread.start()
+        time.sleep(0.1)
+
+        try:
+            # 5 consecutive failed attempts via GET ?k=wrong
+            for i in range(5):
+                try:
+                    urllib.request.urlopen(f"http://127.0.0.1:{auth_port}/api/info?k=wrong_{i}")
+                    self.fail(f"Expected 401 on attempt {i+1}")
+                except urllib.error.HTTPError as e:
+                    self.assertEqual(e.code, 401)
+
+            # 6th attempt should be blocked with 429 Too Many Requests (even with correct PIN!)
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{auth_port}/api/info?k=secret_pin")
+                self.fail("Expected 429 Too Many Requests on 6th attempt")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 429)
+
+            # POST /api/auth should also return 429
+            auth_req = urllib.request.Request(
+                f"http://127.0.0.1:{auth_port}/api/auth",
+                data=json.dumps({"key": "secret_pin"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(auth_req)
+                self.fail("Expected 429 for POST /api/auth while rate limited")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 429)
+
+        finally:
+            auth_server.shutdown()
+            auth_server.server_close()
+            shutil.rmtree(auth_dir, ignore_errors=True)
 
     def test_cli_ssl_options(self):
         from clipto.cli import build_parser
