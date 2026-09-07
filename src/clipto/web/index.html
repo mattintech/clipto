@@ -515,6 +515,23 @@
         <img id="lightbox-img" class="lightbox-img" src="" alt="Preview">
         <div id="lightbox-caption" class="lightbox-caption"></div>
       </div>
+    <!-- Upload Progress Manager Panel -->
+    <div id="upload-panel" class="upload-panel hidden" aria-live="polite">
+      <div class="upload-panel-header">
+        <div class="upload-panel-title">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+          <span id="upload-panel-heading">Active Uploads (0)</span>
+        </div>
+        <div class="upload-panel-controls">
+          <button id="btn-upload-panel-toggle" class="upload-panel-btn" title="Minimize / Expand">
+            <svg id="upload-panel-toggle-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          </button>
+          <button id="btn-upload-panel-close" class="upload-panel-btn" title="Dismiss Finished">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+      </div>
+      <div id="upload-panel-list" class="upload-panel-list"></div>
     </div>
 
     <!-- Toast Notifications -->

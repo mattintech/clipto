@@ -112,6 +112,16 @@
   const authInput = document.getElementById('auth-input');
   const authError = document.getElementById('auth-error');
 
+  // Upload Progress Manager elements
+  const uploadPanel = document.getElementById('upload-panel');
+  const uploadPanelHeading = document.getElementById('upload-panel-heading');
+  const uploadPanelToggle = document.getElementById('btn-upload-panel-toggle');
+  const uploadPanelClose = document.getElementById('btn-upload-panel-close');
+  const uploadPanelList = document.getElementById('upload-panel-list');
+  const uploadPanelToggleIcon = document.getElementById('upload-panel-toggle-icon');
+
+  let serverDebugMode = false;
+  let activeUploadCount = 0;
   let uploadedItems = [];
   let allFiles = [];
   let isOnceMode = false;
@@ -1304,6 +1314,7 @@
         btnDir.setAttribute('aria-label', `Directory: ${currentDir}`);
       }
       isOnceMode = !!data.once;
+      serverDebugMode = !!data.debug;
       currentMobileUrl = data.mobile_url || window.location.href;
       qrUrlDisplay.textContent = currentMobileUrl;
 
@@ -1405,35 +1416,203 @@
 
   const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB chunk size (comfortably under Cloudflare's 100MB limit)
 
-  let activeProgressToast = null;
-  function updateProgressToast(message) {
-    if (!activeProgressToast || !activeProgressToast.isConnected) {
-      activeProgressToast = document.createElement('div');
-      activeProgressToast.className = 'toast info';
-      const span = document.createElement('span');
-      activeProgressToast.appendChild(span);
-      toastContainer.appendChild(activeProgressToast);
-    }
-    activeProgressToast.querySelector('span').textContent = message;
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 
-  function dismissProgressToast() {
-    if (activeProgressToast) {
-      activeProgressToast.remove();
-      activeProgressToast = null;
+  function formatDuration(seconds) {
+    if (!seconds || seconds <= 0) return '< 5s';
+    if (seconds < 60) return `${seconds}s`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (mins < 60) return `${mins}m ${secs}s`;
+    const hours = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return `${hours}h ${remMins}m`;
+  }
+
+  function updateBeforeUnloadGuard() {
+    if (activeUploadCount > 0) {
+      window.onbeforeunload = (e) => {
+        e.preventDefault();
+        e.returnValue = 'An upload is in progress. Leaving or refreshing will cancel it.';
+        return e.returnValue;
+      };
+    } else {
+      window.onbeforeunload = null;
     }
   }
 
-  // Upload large file in chunks directly to disk
+  function updateUploadPanelHeader() {
+    if (!uploadPanel || !uploadPanelList) return;
+    const allItems = uploadPanelList.querySelectorAll('.upload-item');
+    const activeItems = uploadPanelList.querySelectorAll('.upload-item:not(.completed):not(.failed)');
+    activeUploadCount = activeItems.length;
+
+    if (allItems.length === 0) {
+      uploadPanel.classList.add('hidden');
+    } else {
+      uploadPanel.classList.remove('hidden');
+    }
+
+    if (uploadPanelHeading) {
+      if (activeItems.length > 0) {
+        uploadPanelHeading.textContent = `Uploading (${activeItems.length} item${activeItems.length > 1 ? 's' : ''})`;
+      } else {
+        uploadPanelHeading.textContent = `Uploads (${allItems.length} completed)`;
+      }
+    }
+    updateBeforeUnloadGuard();
+  }
+
+  if (uploadPanelToggle) {
+    uploadPanelToggle.addEventListener('click', () => {
+      uploadPanel.classList.toggle('minimized');
+      if (uploadPanel.classList.contains('minimized')) {
+        if (uploadPanelToggleIcon) {
+          uploadPanelToggleIcon.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
+        }
+      } else {
+        if (uploadPanelToggleIcon) {
+          uploadPanelToggleIcon.innerHTML = '<line x1="5" y1="12" x2="19" y2="12"></line>';
+        }
+      }
+    });
+  }
+
+  if (uploadPanelClose) {
+    uploadPanelClose.addEventListener('click', () => {
+      const finished = uploadPanelList.querySelectorAll('.upload-item.completed, .upload-item.failed');
+      finished.forEach((el) => el.remove());
+      updateUploadPanelHeader();
+      if (uploadPanelList.children.length === 0) {
+        uploadPanel.classList.add('hidden');
+      }
+    });
+  }
+
+  // Upload large file in chunks directly to disk with live progress, speed/ETA, and resume support
   async function uploadChunkedFile(file, isGist = false) {
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-    const uploadId = (window.crypto && crypto.getRandomValues)
-      ? Array.from(crypto.getRandomValues(new Uint8Array(16))).map((b) => b.toString(16).padStart(2, '0')).join('')
-      : 'up_' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+    const fingerprint = `${file.name}_${file.size}_${file.lastModified || 0}`;
+    let uploadId = null;
+    let chunksReceived = new Set();
+    let isResumed = false;
 
-    updateProgressToast(`Uploading ${file.name} (0/${totalChunks} chunks - 0%)...`);
+    // Check for existing partial upload on server to resume
+    try {
+      const savedRaw = localStorage.getItem(`clipto_resume_${fingerprint}`);
+      if (savedRaw) {
+        const saved = JSON.parse(savedRaw);
+        if (saved.uploadId) {
+          const statusRes = await fetch(`/api/upload-status?upload_id=${encodeURIComponent(saved.uploadId)}`);
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            if (statusData.exists && Array.isArray(statusData.chunks_received)) {
+              uploadId = saved.uploadId;
+              chunksReceived = new Set(statusData.chunks_received);
+              isResumed = chunksReceived.size > 0;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Could not check resume status:', e);
+    }
+
+    if (!uploadId) {
+      uploadId = (window.crypto && crypto.getRandomValues)
+        ? Array.from(crypto.getRandomValues(new Uint8Array(16))).map((b) => b.toString(16).padStart(2, '0')).join('')
+        : 'up_' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+      try {
+        localStorage.setItem(`clipto_resume_${fingerprint}`, JSON.stringify({ uploadId, filename: file.name, totalChunks, size: file.size }));
+      } catch (_) {}
+    }
+
+    const abortController = new AbortController();
+    let isCancelled = false;
+
+    // Create item in upload panel
+    uploadPanel.classList.remove('hidden');
+    const itemEl = document.createElement('div');
+    itemEl.className = 'upload-item';
+    itemEl.id = `upload-item-${uploadId}`;
+    itemEl.innerHTML = `
+      <div class="upload-item-header">
+        <div class="upload-item-name" title="${escapeHtml(file.name)}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+          <span>${escapeHtml(file.name)}</span>
+        </div>
+        <div class="upload-item-actions">
+          <button class="upload-item-cancel" title="Cancel upload">✕</button>
+        </div>
+      </div>
+      <div class="upload-item-bar-wrap">
+        <div class="upload-item-bar" style="width: 0%"></div>
+      </div>
+      <div class="upload-item-meta">
+        <span class="upload-item-progress">0 B / ${formatSize(file.size)} (0%)</span>
+        <span class="upload-item-speed">${isResumed ? `Resuming (${chunksReceived.size}/${totalChunks} chunks cached)...` : 'Starting...'}</span>
+      </div>
+    `;
+    uploadPanelList.prepend(itemEl);
+    updateUploadPanelHeader();
+
+    const barEl = itemEl.querySelector('.upload-item-bar');
+    const progressEl = itemEl.querySelector('.upload-item-progress');
+    const speedEl = itemEl.querySelector('.upload-item-speed');
+    const cancelBtn = itemEl.querySelector('.upload-item-cancel');
+
+    cancelBtn.addEventListener('click', async () => {
+      isCancelled = true;
+      abortController.abort();
+      try {
+        localStorage.removeItem(`clipto_resume_${fingerprint}`);
+        await fetch('/api/upload-cancel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ upload_id: uploadId }),
+        });
+      } catch (_) {}
+      itemEl.classList.add('failed');
+      itemEl.querySelector('.upload-item-meta').innerHTML = '<span class="upload-item-status-error">✕ Cancelled</span>';
+      cancelBtn.remove();
+      updateUploadPanelHeader();
+    });
+
+    const startTime = Date.now();
+    let lastTime = startTime;
+    let rollingSpeed = 0;
+    let bytesUploadedSoFar = 0;
+
+    // Calculate initial bytes if resumed
+    if (chunksReceived.size > 0) {
+      for (const idx of chunksReceived) {
+        const start = idx * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        bytesUploadedSoFar += (end - start);
+      }
+      const initialPct = Math.min(100, Math.round((bytesUploadedSoFar / file.size) * 100));
+      barEl.style.width = `${initialPct}%`;
+      progressEl.textContent = `${formatSize(bytesUploadedSoFar)} / ${formatSize(file.size)} (${initialPct}%)`;
+    }
+
+    let finalResult = null;
 
     for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      if (isCancelled) return;
+
+      // Skip chunk if already received on server
+      if (chunksReceived.has(chunkIndex)) {
+        continue;
+      }
+
       const start = chunkIndex * CHUNK_SIZE;
       const end = Math.min(start + CHUNK_SIZE, file.size);
       const chunkBlob = file.slice(start, end);
@@ -1442,9 +1621,13 @@
       let lastError = null;
 
       for (let attempt = 1; attempt <= 3; attempt++) {
+        if (isCancelled) return;
+        const t0 = Date.now();
+
         try {
           const res = await fetch('/api/upload-chunk', {
             method: 'POST',
+            signal: abortController.signal,
             headers: {
               'Content-Type': 'application/octet-stream',
               'X-Upload-Id': uploadId,
@@ -1458,9 +1641,11 @@
           });
 
           if (res.status === 401) {
-            dismissProgressToast();
+            itemEl.classList.add('failed');
+            itemEl.querySelector('.upload-item-meta').innerHTML = '<span class="upload-item-status-error">Session expired. Please log in.</span>';
             lockScreen.classList.remove('hidden');
             showAuthError('Session expired. Please re-authenticate.');
+            updateUploadPanelHeader();
             return;
           }
 
@@ -1471,49 +1656,111 @@
 
           const result = await res.json();
           success = true;
+          chunksReceived.add(chunkIndex);
+          bytesUploadedSoFar += chunkBlob.size;
 
-          const pct = Math.round(((chunkIndex + 1) / totalChunks) * 100);
-          updateProgressToast(`Uploading ${file.name} (${chunkIndex + 1}/${totalChunks} chunks - ${pct}%)...`);
+          const now = Date.now();
+          const dt = (now - lastTime) / 1000;
+          if (dt > 0.15) {
+            const instantSpeed = chunkBlob.size / (dt || 0.001);
+            rollingSpeed = rollingSpeed === 0 ? instantSpeed : (rollingSpeed * 0.7 + instantSpeed * 0.3);
+            lastTime = now;
+          }
 
-          if (result.completed && result.saved_files && result.saved_files.length > 0) {
-            dismissProgressToast();
-            playSuccessChime();
-            const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            result.saved_files.forEach((sf) => {
-              uploadedItems.unshift({
-                name: sf.name,
-                size: sf.size,
-                is_image: sf.is_image,
-                path: sf.path,
-                time: now,
-              });
-              showToast(`Saved ${sf.name}`);
-            });
-            renderUploads();
-            loadFiles();
+          const remainingBytes = Math.max(0, file.size - bytesUploadedSoFar);
+          const etaSec = rollingSpeed > 0 ? Math.ceil(remainingBytes / rollingSpeed) : 0;
+          const pct = Math.min(100, Math.round((bytesUploadedSoFar / file.size) * 100));
 
-            if (isOnceMode) {
-              showToast('One-shot received! Server is shutting down.', 'info');
-              if (connectionStatus) {
-                connectionStatus.className = 'status-pill';
-                connectionStatus.querySelector('.status-text').textContent = 'Completed';
-              }
-            }
+          barEl.style.width = `${pct}%`;
+          progressEl.textContent = `${formatSize(bytesUploadedSoFar)} / ${formatSize(file.size)} (${pct}%)`;
+
+          if (serverDebugMode || window.__clipto_debug) {
+            console.debug(`[DEBUG Chunk ${chunkIndex + 1}/${totalChunks}] ${file.name}: ${formatSize(chunkBlob.size)} in ${now - t0}ms (${formatSize(rollingSpeed)}/s)`);
+          }
+
+          if (remainingBytes > 0 && rollingSpeed > 0) {
+            speedEl.textContent = `${formatSize(rollingSpeed)}/s • ETA: ${formatDuration(etaSec)}`;
+          } else {
+            speedEl.textContent = 'Finalizing...';
+          }
+
+          if (result.completed) {
+            finalResult = result;
           }
           break;
         } catch (err) {
+          if (isCancelled || err.name === 'AbortError') return;
           lastError = err;
           if (attempt < 3) {
+            speedEl.textContent = `Retrying (attempt ${attempt + 1}/3)...`;
             await new Promise((r) => setTimeout(r, 1000));
           }
         }
       }
 
       if (!success) {
-        dismissProgressToast();
-        throw new Error(`Failed uploading chunk ${chunkIndex + 1}/${totalChunks}: ${lastError ? lastError.message : 'Network error'}`);
+        itemEl.classList.add('failed');
+        itemEl.querySelector('.upload-item-meta').innerHTML = `
+          <span class="upload-item-status-error">✕ Upload failed: ${escapeHtml(lastError ? lastError.message : 'Network error')}</span>
+        `;
+        cancelBtn.remove();
+        updateUploadPanelHeader();
+        throw new Error(`Failed uploading ${file.name}: ${lastError ? lastError.message : 'Network error'}`);
       }
     }
+
+    // All chunks completed!
+    try {
+      localStorage.removeItem(`clipto_resume_${fingerprint}`);
+    } catch (_) {}
+
+    itemEl.classList.add('completed');
+    barEl.style.width = '100%';
+    const totalDurationSec = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+    const avgSpeed = file.size / totalDurationSec;
+    itemEl.querySelector('.upload-item-meta').innerHTML = `
+      <span class="upload-item-status-done">✓ Completed (${formatSize(file.size)})</span>
+      <span class="upload-item-speed">${formatSize(avgSpeed)}/s avg</span>
+    `;
+    cancelBtn.remove();
+    updateUploadPanelHeader();
+
+    playSuccessChime();
+    const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    if (finalResult && finalResult.saved_files && finalResult.saved_files.length > 0) {
+      finalResult.saved_files.forEach((sf) => {
+        uploadedItems.unshift({
+          name: sf.name,
+          size: sf.size,
+          is_image: sf.is_image,
+          path: sf.path,
+          time: nowStr,
+        });
+        showToast(`Saved ${sf.name}`);
+      });
+      renderUploads();
+      loadFiles();
+
+      if (isOnceMode) {
+        showToast('One-shot received! Server is shutting down.', 'info');
+        if (connectionStatus) {
+          connectionStatus.className = 'status-pill';
+          connectionStatus.querySelector('.status-text').textContent = 'Completed';
+        }
+      }
+    }
+
+    // Auto-dismiss completed row after 6 seconds if idle
+    setTimeout(() => {
+      if (itemEl && itemEl.classList.contains('completed')) {
+        itemEl.style.opacity = '0';
+        setTimeout(() => {
+          itemEl.remove();
+          updateUploadPanelHeader();
+        }, 300);
+      }
+    }, 6000);
   }
 
   // Handle files (from input or drop)

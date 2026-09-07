@@ -1035,6 +1035,87 @@ class TestCliptoServer(unittest.TestCase):
         self.assertEqual(args2.cert, Path("cert.pem"))
         self.assertEqual(args2.key, Path("key.pem"))
 
+    def test_upload_status_and_cancel(self):
+        chunk_dir = Path(tempfile.mkdtemp())
+        port = find_available_port(0)
+        server = CliptoHTTPServer(
+            ("127.0.0.1", port),
+            CliptoRequestHandler,
+            upload_dir=chunk_dir,
+            title="Resume Test",
+            once=False,
+            debug=True,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        time.sleep(0.1)
+
+        upload_id = "test_resume_upload_12345"
+
+        try:
+            # Check status before upload -> exists: False
+            req_status_pre = urllib.request.Request(f"http://127.0.0.1:{port}/api/upload-status?upload_id={upload_id}")
+            with urllib.request.urlopen(req_status_pre) as resp:
+                data = json.loads(resp.read().decode())
+                self.assertFalse(data["exists"])
+
+            # Upload chunk 0 of 2
+            req_chunk0 = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/upload-chunk",
+                data=b"CHUNK_0_BYTES",
+                headers={
+                    "Content-Type": "application/octet-stream",
+                    "X-Upload-Id": upload_id,
+                    "X-Chunk-Index": "0",
+                    "X-Total-Chunks": "2",
+                    "X-Chunk-Size": "14",
+                    "X-Filename": "resume_file.bin",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req_chunk0) as resp:
+                data = json.loads(resp.read().decode())
+                self.assertFalse(data["completed"])
+
+            # Check status -> exists: True, chunks_received: [0]
+            req_status_post = urllib.request.Request(f"http://127.0.0.1:{port}/api/upload-status?upload_id={upload_id}")
+            with urllib.request.urlopen(req_status_post) as resp:
+                data = json.loads(resp.read().decode())
+                self.assertTrue(data["exists"])
+                self.assertEqual(data["chunks_received"], [0])
+                self.assertEqual(data["total_chunks"], 2)
+
+            # Cancel upload
+            req_cancel = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/upload-cancel",
+                data=json.dumps({"upload_id": upload_id}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req_cancel) as resp:
+                data = json.loads(resp.read().decode())
+                self.assertTrue(data["cancelled"])
+
+            # Part file should be unlinked
+            part_file = chunk_dir / f".clipto_part_{upload_id}"
+            self.assertFalse(part_file.exists())
+
+            # Status should now report exists: False
+            with urllib.request.urlopen(req_status_pre) as resp:
+                data = json.loads(resp.read().decode())
+                self.assertFalse(data["exists"])
+
+        finally:
+            server.shutdown()
+            server.server_close()
+            shutil.rmtree(chunk_dir, ignore_errors=True)
+
+    def test_cli_debug_option(self):
+        from clipto.cli import build_parser
+        parser = build_parser()
+        args = parser.parse_args(["--debug"])
+        self.assertTrue(args.debug)
+
 
 if __name__ == "__main__":
     unittest.main()

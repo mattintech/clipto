@@ -80,6 +80,7 @@ class CliptoHTTPServer(ThreadingHTTPServer):
         share_file: Optional[Path] = None,
         ssl_cert: Optional[Path] = None,
         ssl_key: Optional[Path] = None,
+        debug: bool = False,
     ):
         super().__init__(server_address, RequestHandlerClass)
         self.upload_dir = Path(upload_dir).resolve()
@@ -94,6 +95,7 @@ class CliptoHTTPServer(ThreadingHTTPServer):
         self.ssl_cert = Path(ssl_cert).resolve() if ssl_cert else None
         self.ssl_key = Path(ssl_key).resolve() if ssl_key else None
         self.is_ssl = bool(self.ssl_cert and self.ssl_key)
+        self.debug = debug
         self.ssl_context = None
         if self.is_ssl:
             import ssl
@@ -404,8 +406,32 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 "share_mode": self.server.share_mode,
                 "share_file": self.server.share_file.name if self.server.share_file else None,
                 "is_ssl": self.server.is_ssl,
+                "debug": getattr(self.server, "debug", False),
                 "config": load_global_config(),
             })
+        elif path == "/api/upload-status":
+            upload_id = urllib.parse.parse_qs(parsed_url.query).get("upload_id", [""])[0].strip()
+            if not re.match(r"^[a-zA-Z0-9_-]{8,64}$", upload_id):
+                self.send_json(400, {"error": "Invalid upload_id"})
+                return
+
+            with self.server.chunk_lock:
+                upload_info = self.server.active_chunk_uploads.get(upload_id)
+                if upload_info:
+                    part_file = upload_info.get("part_file")
+                    bytes_written = part_file.stat().st_size if (part_file and part_file.is_file()) else 0
+                    self.send_json(200, {
+                        "exists": True,
+                        "upload_id": upload_id,
+                        "filename": upload_info.get("filename"),
+                        "total_chunks": upload_info.get("total_chunks"),
+                        "chunks_received": sorted(list(upload_info.get("chunks_received", []))),
+                        "bytes_written": bytes_written,
+                    })
+                    return
+
+            self.send_json(200, {"exists": False})
+            return
         elif path == "/api/config":
             self.send_json(200, load_global_config())
         elif path == "/api/qr":
@@ -802,6 +828,7 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 self.send_json(403, {"error": "Forbidden"})
                 return
 
+            t_chunk_start = time.time()
             try:
                 mode = "r+b" if part_file.is_file() else "w+b"
                 with open(part_file, mode) as f:
@@ -817,6 +844,16 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json(500, {"error": f"Failed writing chunk: {e}"})
                 return
+
+            if getattr(self.server, "debug", False):
+                dur_ms = (time.time() - t_chunk_start) * 1000
+                speed_mb = (content_length / (1024 * 1024)) / ((time.time() - t_chunk_start) or 0.001)
+                print(
+                    f"[DEBUG] Chunk {chunk_index + 1}/{total_chunks} ({content_length / (1024 * 1024):.2f}MB) "
+                    f"for '{clean_name}' written to offset {offset} in {dur_ms:.1f}ms ({speed_mb:.1f} MB/s)",
+                    file=sys.stderr,
+                )
+
 
             with self.server.chunk_lock:
                 now = time.time()
@@ -886,6 +923,30 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
 
             if self.server.once and self.server.uploaded_files:
                 threading.Timer(0.3, self.server.shutdown_event.set).start()
+            return
+
+        if self.path == "/api/upload-cancel":
+            if not self.is_authenticated():
+                self.send_json(401, {"error": "Authentication required"})
+                return
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body.decode("utf-8")) if body else {}
+            except Exception:
+                data = {}
+            upload_id = data.get("upload_id", "").strip()
+            if not re.match(r"^[a-zA-Z0-9_-]{8,64}$", upload_id):
+                self.send_json(400, {"error": "Invalid upload_id"})
+                return
+            with self.server.chunk_lock:
+                info = self.server.active_chunk_uploads.pop(upload_id, None)
+                if info and info.get("part_file") and info["part_file"].is_file():
+                    try:
+                        info["part_file"].unlink()
+                    except Exception:
+                        pass
+            self.send_json(200, {"status": "ok", "cancelled": True})
             return
 
         if self.path != "/api/upload":

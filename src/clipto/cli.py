@@ -141,6 +141,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Timeout in seconds (useful with --once to prevent hanging indefinitely).",
     )
     parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable verbose debug logging (chunk-level telemetry, timing, and offsets).",
+    )
+    parser.add_argument(
         "share_args",
         nargs="*",
         default=[],
@@ -411,6 +416,7 @@ def main():
             share_file=share_file,
             ssl_cert=ssl_cert,
             ssl_key=ssl_key,
+            debug=args.debug,
         )
     except OSError as e:
         stop_tunnel(tunnel_proc)
