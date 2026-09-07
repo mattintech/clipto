@@ -402,6 +402,25 @@ class TestCliptoServer(unittest.TestCase):
         finally:
             sys.stderr = old_stderr
 
+    def test_start_cloudflare_tunnel_registration(self):
+        from unittest.mock import MagicMock, patch
+        from clipto.tunnel import start_cloudflare_tunnel
+
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_proc.stderr.readline.side_effect = [
+            "INF Requesting new quick Tunnel on trycloudflare.com...\n",
+            "INF | https://test-tunnel-unit.trycloudflare.com |\n",
+            "INF Registered tunnel connection connIndex=0 connection=12345 protocol=quic\n",
+        ]
+
+        with patch("shutil.which", return_value="/usr/local/bin/cloudflared"), \
+             patch("subprocess.Popen", return_value=mock_proc), \
+             patch("time.sleep", return_value=None):
+            url, proc = start_cloudflare_tunnel(8765, timeout=5.0)
+            self.assertEqual(url, "https://test-tunnel-unit.trycloudflare.com")
+            self.assertEqual(proc, mock_proc)
+
     def test_totp_rfc6238_and_verification(self):
         from clipto.totp import (
             calculate_totp,

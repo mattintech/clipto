@@ -17,11 +17,13 @@ def is_tailscale_available() -> bool:
     return shutil.which("tailscale") is not None
 
 
-def start_cloudflare_tunnel(port: int, timeout: float = 12.0) -> Tuple[str, subprocess.Popen]:
+def start_cloudflare_tunnel(port: int, timeout: float = 18.0) -> Tuple[str, subprocess.Popen]:
     """
     Start a Cloudflare Quick Tunnel using cloudflared.
     Passes --config /dev/null to ensure pre-existing named tunnel configurations
     in ~/.cloudflared/config.yml do not intercept or block quick tunnel traffic.
+    Waits for both edge connector registration and Anycast DNS propagation
+    before returning to prevent premature local requests from caching NXDOMAIN or 404.
     Returns (public_https_url, process).
     """
     if not is_cloudflared_available():
@@ -50,9 +52,10 @@ def start_cloudflare_tunnel(port: int, timeout: float = 12.0) -> Tuple[str, subp
     )
 
     url = None
+    registered = False
     start_time = time.time()
 
-    # cloudflared prints its quick tunnel URL to stderr
+    # cloudflared prints its quick tunnel URL and connection registration to stderr
     while time.time() - start_time < timeout:
         if proc.poll() is not None:
             err = proc.stderr.read() if proc.stderr else "Unknown error"
@@ -63,14 +66,24 @@ def start_cloudflare_tunnel(port: int, timeout: float = 12.0) -> Tuple[str, subp
             time.sleep(0.1)
             continue
 
-        match = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
-        if match:
-            url = match.group(0)
+        if not url:
+            match = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
+            if match:
+                url = match.group(0)
+
+        if "Registered tunnel connection" in line:
+            registered = True
             break
 
     if not url:
         proc.terminate()
         raise TimeoutError("Timed out waiting for Cloudflare tunnel URL to establish.")
+
+    # Cloudflare Anycast edge needs 2-3 seconds for global DNS propagation of the
+    # newly generated subdomain. Waiting ensures immediate local clicks don't hit
+    # an unpropagated DNS record and poison the local resolver's negative cache (NXDOMAIN).
+    if registered:
+        time.sleep(2.5)
 
     return url, proc
 
