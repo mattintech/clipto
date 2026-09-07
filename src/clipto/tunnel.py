@@ -54,14 +54,26 @@ def start_cloudflare_tunnel(port: int, timeout: float = 18.0) -> Tuple[str, subp
     url = None
     registered = False
     start_time = time.time()
+    stderr_lines = []
 
     # cloudflared prints its quick tunnel URL and connection registration to stderr
     while time.time() - start_time < timeout:
-        if proc.poll() is not None:
-            err = proc.stderr.read() if proc.stderr else "Unknown error"
-            raise RuntimeError(f"cloudflared exited unexpectedly: {err}")
+        line = proc.stderr.readline() if proc.stderr else ""
+        if line:
+            stderr_lines.append(line)
 
-        line = proc.stderr.readline()
+        if not line and proc.poll() is not None:
+            remaining = proc.stderr.read() if proc.stderr else ""
+            if remaining:
+                stderr_lines.append(remaining)
+            err_text = "".join(stderr_lines).strip()
+            if "1015" in err_text or "429" in err_text:
+                raise RuntimeError(
+                    "Cloudflare is temporarily rate limiting quick tunnel creation from your IP "
+                    "(Error 1015 / 429 Too Many Requests). Please wait 5-10 minutes before creating another tunnel."
+                )
+            raise RuntimeError(f"cloudflared exited unexpectedly:\n{err_text}")
+
         if not line:
             time.sleep(0.1)
             continue
