@@ -1318,6 +1318,13 @@
       currentMobileUrl = data.mobile_url || window.location.href;
       qrUrlDisplay.textContent = currentMobileUrl;
 
+      if (data.version) {
+        const versionEl = document.getElementById('app-version');
+        if (versionEl) {
+          versionEl.textContent = `v${data.version}`;
+        }
+      }
+
       if (data.title) {
         sessionTitle.textContent = data.title;
         sessionTitle.classList.remove('hidden');
