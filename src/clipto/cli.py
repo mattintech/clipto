@@ -438,8 +438,7 @@ def main():
     if args.open:
         active_key = server.get_current_auth_key()
         scheme = "https" if server.is_ssl else "http"
-        # Always open local server on the host machine where Clipto was launched
-        target_open = f"{scheme}://localhost:{port}"
+        target_open = tunnel_url or f"{scheme}://localhost:{port}"
         query_suffix = f"/?k={active_key}" if active_key else ""
         hash_suffix = ""
         if share_file:
