@@ -895,6 +895,113 @@ class TestCliptoServer(unittest.TestCase):
             auth_server.server_close()
             shutil.rmtree(auth_dir, ignore_errors=True)
 
+    def test_chunked_upload_assembly(self):
+        upload_id = "test_upload_12345678"
+        chunk_data = [
+            b"PART1_DATA_" * 100,
+            b"PART2_DATA_" * 100,
+            b"PART3_DATA_" * 50,
+        ]
+        total_data = b"".join(chunk_data)
+        chunk_size = len(chunk_data[0])
+
+        for i, chunk in enumerate(chunk_data):
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{self.port}/api/upload-chunk",
+                data=chunk,
+                headers={
+                    "Content-Type": "application/octet-stream",
+                    "X-Upload-Id": upload_id,
+                    "X-Chunk-Index": str(i),
+                    "X-Total-Chunks": "3",
+                    "X-Chunk-Size": str(chunk_size),
+                    "X-Filename": urllib.parse.quote("my_large_video.mp4"),
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req) as resp:
+                self.assertEqual(resp.status, 200)
+                res_json = json.loads(resp.read().decode())
+                if i < 2:
+                    self.assertFalse(res_json["completed"])
+                    self.assertEqual(res_json["chunk"], i)
+                else:
+                    self.assertTrue(res_json["completed"])
+                    self.assertEqual(len(res_json["saved_files"]), 1)
+                    self.assertEqual(res_json["saved_files"][0]["name"], "my_large_video.mp4")
+
+        # Verify file exists on disk and content matches
+        saved_file = self.temp_dir / "my_large_video.mp4"
+        self.assertTrue(saved_file.is_file())
+        self.assertEqual(saved_file.read_bytes(), total_data)
+
+        # Temporary part file should have been cleaned up
+        self.assertFalse((self.temp_dir / f".clipto_part_{upload_id}").exists())
+
+    def test_chunked_upload_security_guards(self):
+        # 1. Invalid upload_id (path traversal attempt)
+        req_bad_id = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/upload-chunk",
+            data=b"test",
+            headers={
+                "Content-Type": "application/octet-stream",
+                "X-Upload-Id": "../../../etc/passwd",
+                "X-Chunk-Index": "0",
+                "X-Total-Chunks": "1",
+                "X-Chunk-Size": "4",
+                "X-Filename": "test.bin",
+            },
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(req_bad_id)
+            self.fail("Expected 400 for path traversal upload_id")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 400)
+
+        # 2. Rejection in single-file share mode
+        share_dir = Path(tempfile.mkdtemp())
+        share_port = find_available_port(0)
+        target_file = share_dir / "only_this.txt"
+        target_file.write_text("ONLY")
+
+        server = CliptoHTTPServer(
+            ("127.0.0.1", share_port),
+            CliptoRequestHandler,
+            upload_dir=share_dir,
+            title="Share Guard",
+            once=False,
+            share_mode=True,
+            share_file=target_file,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        time.sleep(0.1)
+
+        try:
+            req_chunk = urllib.request.Request(
+                f"http://127.0.0.1:{share_port}/api/upload-chunk",
+                data=b"test",
+                headers={
+                    "Content-Type": "application/octet-stream",
+                    "X-Upload-Id": "valid_id_123456",
+                    "X-Chunk-Index": "0",
+                    "X-Total-Chunks": "1",
+                    "X-Chunk-Size": "4",
+                    "X-Filename": "test.bin",
+                },
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(req_chunk)
+                self.fail("Expected 403 for upload-chunk in share_file mode")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 403)
+        finally:
+            server.shutdown()
+            server.server_close()
+            shutil.rmtree(share_dir, ignore_errors=True)
+
     def test_cli_ssl_options(self):
         from clipto.cli import build_parser
         parser = build_parser()

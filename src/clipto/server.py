@@ -3,6 +3,7 @@ import hmac
 import http.cookies
 import json
 import mimetypes
+import re
 import secrets
 import shutil
 import socket
@@ -103,6 +104,20 @@ class CliptoHTTPServer(ThreadingHTTPServer):
         self.failed_auth_attempts = collections.defaultdict(list)
         self.authenticated_sessions: Set[str] = set()
         self.auth_lock = threading.Lock()
+        self.active_chunk_uploads = {}
+        self.chunk_lock = threading.Lock()
+        self._cleanup_temp_part_files()
+
+    def _cleanup_temp_part_files(self) -> None:
+        """Purge temporary part files left behind by interrupted uploads."""
+        try:
+            for part in self.upload_dir.glob(".clipto_part_*"):
+                try:
+                    part.unlink()
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def is_rate_limited(self, client_ip: str) -> bool:
         """Check if an IP has exceeded failed authentication threshold (5 attempts / min)."""
@@ -120,6 +135,10 @@ class CliptoHTTPServer(ThreadingHTTPServer):
             self.failed_auth_attempts[client_ip].append(now)
 
     def finish_request(self, request, client_address):
+        try:
+            request.settimeout(60.0)
+        except Exception:
+            pass
         if not self.is_ssl or not self.ssl_context:
             super().finish_request(request, client_address)
             return
@@ -678,6 +697,9 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
 
             try:
                 content_length = int(self.headers.get("Content-Length", 0))
+                if content_length > 10 * 1024 * 1024:
+                    self.send_json(413, {"error": "Gist content exceeds 10MB limit"})
+                    return
                 body = self.rfile.read(content_length)
                 data = json.loads(body.decode("utf-8"))
                 raw_filename = (data.get("filename") or data.get("name") or "").strip()
@@ -715,12 +737,155 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
 
             try:
                 content_length = int(self.headers.get("Content-Length", 0))
+                if content_length > 64 * 1024:
+                    self.send_json(413, {"error": "Config payload exceeds 64KB limit"})
+                    return
                 body = self.rfile.read(content_length)
                 data = json.loads(body.decode("utf-8"))
                 updated = save_global_config(data)
                 self.send_json(200, {"status": "ok", "config": updated})
             except Exception as e:
                 self.send_json(400, {"error": f"Failed to update config: {e}"})
+            return
+
+        # Chunked upload endpoint
+        if self.path == "/api/upload-chunk":
+            if self.server.share_file:
+                self.send_json(403, {"error": "Uploads disabled: server is in single-file share mode"})
+                return
+
+            if not self.is_authenticated():
+                if getattr(self, "_rate_limited", False):
+                    self.send_json(429, {"error": "Too many failed attempts. Please wait 1 minute."})
+                    return
+                self.send_json(401, {"error": "Authentication required", "auth_required": True})
+                return
+
+            upload_id = self.headers.get("X-Upload-Id", "").strip()
+            if not re.match(r"^[a-zA-Z0-9_-]{8,64}$", upload_id):
+                self.send_json(400, {"error": "Invalid or missing X-Upload-Id header"})
+                return
+
+            try:
+                chunk_index = int(self.headers.get("X-Chunk-Index", "-1"))
+                total_chunks = int(self.headers.get("X-Total-Chunks", "0"))
+                chunk_size = int(self.headers.get("X-Chunk-Size", "0"))
+            except ValueError:
+                self.send_json(400, {"error": "Invalid chunk headers"})
+                return
+
+            if chunk_index < 0 or total_chunks <= 0 or chunk_index >= total_chunks:
+                self.send_json(400, {"error": "Invalid chunk index or total chunks"})
+                return
+
+            raw_filename = self.headers.get("X-Filename", "").strip()
+            raw_filename = urllib.parse.unquote(raw_filename)
+            if not raw_filename:
+                self.send_json(400, {"error": "Missing X-Filename header"})
+                return
+
+            clean_name = sanitize_filename(raw_filename, default_name="upload.bin")
+            if clean_name.startswith("."):
+                clean_name = clean_name.lstrip(". ") or "upload.bin"
+
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length <= 0 or content_length > 25 * 1024 * 1024:
+                self.send_json(400, {"error": "Chunk size must be between 1 byte and 25MB"})
+                return
+
+            is_gist = self.headers.get("X-Is-Gist", "0").strip().lower() in ("1", "true", "yes")
+
+            part_file = (self.server.upload_dir / f".clipto_part_{upload_id}").resolve()
+            try:
+                part_file.relative_to(self.server.upload_dir)
+            except ValueError:
+                self.send_json(403, {"error": "Forbidden"})
+                return
+
+            try:
+                mode = "r+b" if part_file.is_file() else "w+b"
+                with open(part_file, mode) as f:
+                    offset = chunk_index * chunk_size if chunk_size > 0 else f.seek(0, 2)
+                    f.seek(offset)
+                    remaining = content_length
+                    while remaining > 0:
+                        chunk_bytes = self.rfile.read(min(remaining, 65536))
+                        if not chunk_bytes:
+                            break
+                        f.write(chunk_bytes)
+                        remaining -= len(chunk_bytes)
+            except Exception as e:
+                self.send_json(500, {"error": f"Failed writing chunk: {e}"})
+                return
+
+            with self.server.chunk_lock:
+                now = time.time()
+                # Purge stale uploads older than 1 hour
+                stale_ids = [uid for uid, st in self.server.active_chunk_uploads.items() if now - st.get("created_at", now) > 3600]
+                for uid in stale_ids:
+                    stale_info = self.server.active_chunk_uploads.pop(uid, None)
+                    if stale_info and stale_info.get("part_file") and stale_info["part_file"].is_file():
+                        try:
+                            stale_info["part_file"].unlink()
+                        except Exception:
+                            pass
+
+                if upload_id not in self.server.active_chunk_uploads:
+                    self.server.active_chunk_uploads[upload_id] = {
+                        "chunks_received": set(),
+                        "total_chunks": total_chunks,
+                        "filename": clean_name,
+                        "part_file": part_file,
+                        "created_at": now,
+                        "is_gist": is_gist,
+                    }
+
+                upload_state = self.server.active_chunk_uploads[upload_id]
+                upload_state["chunks_received"].add(chunk_index)
+                received_count = len(upload_state["chunks_received"])
+                is_completed = (received_count == total_chunks)
+
+            if not is_completed:
+                self.send_json(200, {
+                    "status": "ok",
+                    "completed": False,
+                    "chunk": chunk_index,
+                    "received": received_count,
+                    "total": total_chunks,
+                })
+                return
+
+            # All chunks received! Finalize file
+            with self.server.chunk_lock:
+                self.server.active_chunk_uploads.pop(upload_id, None)
+
+            target_path = get_unique_path(self.server.upload_dir, clean_name)
+            try:
+                part_file.rename(target_path)
+            except Exception:
+                shutil.move(str(part_file), str(target_path))
+
+            if is_gist:
+                self.server.record_gist(target_path.name)
+
+            is_img = target_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
+            stat = target_path.stat()
+            saved_result = [{
+                "name": target_path.name,
+                "path": str(target_path.resolve()),
+                "size": stat.st_size,
+                "is_image": is_img,
+            }]
+            self.server.uploaded_files.append(target_path)
+
+            self.send_json(200, {
+                "status": "ok",
+                "completed": True,
+                "saved_files": saved_result,
+            })
+
+            if self.server.once and self.server.uploaded_files:
+                threading.Timer(0.3, self.server.shutdown_event.set).start()
             return
 
         if self.path != "/api/upload":
@@ -748,6 +913,9 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
             content_length = int(self.headers.get("Content-Length", 0))
             if content_length <= 0:
                 self.send_error(400, "Invalid Content-Length")
+                return
+            if content_length > 500 * 1024 * 1024:
+                self.send_json(413, {"error": "Upload exceeds 500MB single-request limit. Please use chunked upload."})
                 return
 
             body = self.rfile.read(content_length)

@@ -1403,14 +1403,150 @@
     }
   }
 
-  // Handle files (from input or drop)
-  function handleFiles(files) {
-    if (!files || files.length === 0) return;
-    const formData = new FormData();
-    for (const file of files) {
-      formData.append('files', file, file.name);
+  const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB chunk size (comfortably under Cloudflare's 100MB limit)
+
+  let activeProgressToast = null;
+  function updateProgressToast(message) {
+    if (!activeProgressToast || !activeProgressToast.isConnected) {
+      activeProgressToast = document.createElement('div');
+      activeProgressToast.className = 'toast info';
+      const span = document.createElement('span');
+      activeProgressToast.appendChild(span);
+      toastContainer.appendChild(activeProgressToast);
     }
-    uploadFormData(formData);
+    activeProgressToast.querySelector('span').textContent = message;
+  }
+
+  function dismissProgressToast() {
+    if (activeProgressToast) {
+      activeProgressToast.remove();
+      activeProgressToast = null;
+    }
+  }
+
+  // Upload large file in chunks directly to disk
+  async function uploadChunkedFile(file, isGist = false) {
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    const uploadId = (window.crypto && crypto.getRandomValues)
+      ? Array.from(crypto.getRandomValues(new Uint8Array(16))).map((b) => b.toString(16).padStart(2, '0')).join('')
+      : 'up_' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+
+    updateProgressToast(`Uploading ${file.name} (0/${totalChunks} chunks - 0%)...`);
+
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      const start = chunkIndex * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      const chunkBlob = file.slice(start, end);
+
+      let success = false;
+      let lastError = null;
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const res = await fetch('/api/upload-chunk', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/octet-stream',
+              'X-Upload-Id': uploadId,
+              'X-Chunk-Index': String(chunkIndex),
+              'X-Total-Chunks': String(totalChunks),
+              'X-Chunk-Size': String(CHUNK_SIZE),
+              'X-Filename': encodeURIComponent(file.name),
+              'X-Is-Gist': isGist ? '1' : '0',
+            },
+            body: chunkBlob,
+          });
+
+          if (res.status === 401) {
+            dismissProgressToast();
+            lockScreen.classList.remove('hidden');
+            showAuthError('Session expired. Please re-authenticate.');
+            return;
+          }
+
+          if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(errText || `Server returned ${res.status}`);
+          }
+
+          const result = await res.json();
+          success = true;
+
+          const pct = Math.round(((chunkIndex + 1) / totalChunks) * 100);
+          updateProgressToast(`Uploading ${file.name} (${chunkIndex + 1}/${totalChunks} chunks - ${pct}%)...`);
+
+          if (result.completed && result.saved_files && result.saved_files.length > 0) {
+            dismissProgressToast();
+            playSuccessChime();
+            const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            result.saved_files.forEach((sf) => {
+              uploadedItems.unshift({
+                name: sf.name,
+                size: sf.size,
+                is_image: sf.is_image,
+                path: sf.path,
+                time: now,
+              });
+              showToast(`Saved ${sf.name}`);
+            });
+            renderUploads();
+            loadFiles();
+
+            if (isOnceMode) {
+              showToast('One-shot received! Server is shutting down.', 'info');
+              if (connectionStatus) {
+                connectionStatus.className = 'status-pill';
+                connectionStatus.querySelector('.status-text').textContent = 'Completed';
+              }
+            }
+          }
+          break;
+        } catch (err) {
+          lastError = err;
+          if (attempt < 3) {
+            await new Promise((r) => setTimeout(r, 1000));
+          }
+        }
+      }
+
+      if (!success) {
+        dismissProgressToast();
+        throw new Error(`Failed uploading chunk ${chunkIndex + 1}/${totalChunks}: ${lastError ? lastError.message : 'Network error'}`);
+      }
+    }
+  }
+
+  // Handle files (from input or drop)
+  async function handleFiles(files) {
+    if (!files || files.length === 0) return;
+
+    const smallFiles = [];
+    const largeFiles = [];
+
+    for (const file of files) {
+      if (file.size > CHUNK_SIZE) {
+        largeFiles.push(file);
+      } else {
+        smallFiles.push(file);
+      }
+    }
+
+    if (smallFiles.length > 0) {
+      const formData = new FormData();
+      for (const file of smallFiles) {
+        formData.append('files', file, file.name);
+      }
+      uploadFormData(formData);
+    }
+
+    for (const file of largeFiles) {
+      try {
+        await uploadChunkedFile(file);
+      } catch (err) {
+        console.error(err);
+        showToast(`Upload failed for ${file.name}: ${err.message}`, 'error');
+      }
+    }
   }
 
   // Global Paste Handler
@@ -1437,9 +1573,14 @@
             const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '');
             const filename = `clip_${dateStr}_${timeStr}.png`;
 
-            const formData = new FormData();
-            formData.append('files', blob, filename);
-            uploadFormData(formData);
+            if (blob.size > CHUNK_SIZE) {
+              const fileFromBlob = new File([blob], filename, { type: blob.type });
+              uploadChunkedFile(fileFromBlob);
+            } else {
+              const formData = new FormData();
+              formData.append('files', blob, filename);
+              uploadFormData(formData);
+            }
             break;
           }
         }
