@@ -1116,6 +1116,29 @@ class TestCliptoServer(unittest.TestCase):
         args = parser.parse_args(["--debug"])
         self.assertTrue(args.debug)
 
+    def test_cli_single_dash_long_options_rejected(self):
+        from clipto.cli import build_parser
+        parser = build_parser()
+
+        # -debug should fail with SystemExit(2)
+        with self.assertRaises(SystemExit) as ctx:
+            parser.parse_args(["-debug"])
+        self.assertEqual(ctx.exception.code, 2)
+
+        # -dir should fail with SystemExit(2)
+        with self.assertRaises(SystemExit) as ctx:
+            parser.parse_args(["-dir"])
+        self.assertEqual(ctx.exception.code, 2)
+
+        # Legitimate clustered flags should still work
+        args_cluster = parser.parse_args(["-1o"])
+        self.assertTrue(args_cluster.once)
+        self.assertTrue(args_cluster.open)
+
+        # Separate -d <path> should still work
+        args_dir = parser.parse_args(["-d", "/tmp"])
+        self.assertEqual(str(args_dir.dir), "/tmp")
+
 
 if __name__ == "__main__":
     unittest.main()

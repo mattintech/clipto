@@ -29,8 +29,25 @@ from clipto.utils import (
 )
 
 
+class CliptoArgumentParser(argparse.ArgumentParser):
+    """Custom parser that catches single-dash mistyped long options (e.g. -debug instead of --debug)."""
+
+    def parse_known_args(self, args=None, namespace=None):
+        argv = sys.argv[1:] if args is None else list(args)
+        known_long = {opt for action in self._actions for opt in action.option_strings if opt.startswith("--")}
+
+        for a in argv:
+            if a.startswith("-") and not a.startswith("--") and len(a) > 2:
+                token = a[1:].split("=")[0]
+                candidate = f"--{token}"
+                if candidate in known_long:
+                    self.error(f"unrecognized argument: {a} (did you mean '{candidate}'?)")
+
+        return super().parse_known_args(args, namespace)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = CliptoArgumentParser(
         prog="clipto",
         description="Instant clipboard, screenshot, and file bridge from browser to terminal.",
     )
