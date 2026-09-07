@@ -38,7 +38,7 @@ body {
 .app-container {
   width: 100%;
   max-width: 860px;
-  padding: 24px 16px;
+  padding: 24px 16px 56px 16px;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -1785,8 +1785,8 @@ body {
 /* Upload Progress Manager Panel */
 .upload-panel {
   position: fixed;
-  bottom: 24px;
-  right: 24px;
+  bottom: 44px;
+  right: 20px;
   width: 380px;
   max-width: calc(100vw - 48px);
   background: var(--bg-card, #1e222d);
@@ -1963,5 +1963,85 @@ body {
   border-radius: 4px;
   cursor: pointer;
   font-weight: 500;
+}
+
+/* Persistent Bottom Status Bar */
+.status-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 32px;
+  background: rgba(24, 28, 38, 0.94);
+  border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 0.75rem;
+  color: var(--text-muted, #94a3b8);
+  z-index: 900;
+  user-select: none;
+  backdrop-filter: blur(8px);
+}
+
+.status-bar-left,
+.status-bar-right,
+.status-bar-center {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-divider {
+  opacity: 0.35;
+  font-size: 0.7rem;
+}
+
+.status-text-dir {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-version-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--text-muted, #94a3b8);
+  font-size: 0.7rem;
+}
+
+.status-upload-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  color: #a5b4fc;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.status-upload-indicator:hover {
+  background: rgba(99, 102, 241, 0.3);
+  transform: translateY(-1px);
+}
+
+.status-upload-indicator.hidden {
+  display: none !important;
+}
+
+.spin-icon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 

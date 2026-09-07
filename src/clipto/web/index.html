@@ -516,6 +516,8 @@
         <img id="lightbox-img" class="lightbox-img" src="" alt="Preview">
         <div id="lightbox-caption" class="lightbox-caption"></div>
       </div>
+    </div>
+
     <!-- Upload Progress Manager Panel -->
     <div id="upload-panel" class="upload-panel hidden" aria-live="polite">
       <div class="upload-panel-header">
@@ -534,6 +536,31 @@
       </div>
       <div id="upload-panel-list" class="upload-panel-list"></div>
     </div>
+
+    <!-- Persistent Bottom Status Bar -->
+    <footer id="status-bar" class="status-bar" role="status">
+      <div class="status-bar-left">
+        <div id="connection-status" class="status-pill online">
+          <span class="dot"></span>
+          <span class="status-text">Connected</span>
+        </div>
+        <span class="status-divider">•</span>
+        <span id="status-dir" class="status-text-dir" title="Upload Directory">/</span>
+      </div>
+
+      <div class="status-bar-center">
+        <div id="status-upload-indicator" class="status-upload-indicator hidden" title="Click to view upload progress">
+          <svg class="spin-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+          <span id="status-upload-summary">Uploading...</span>
+        </div>
+      </div>
+
+      <div class="status-bar-right">
+        <span id="status-session-count" class="status-muted">0 uploads</span>
+        <span class="status-divider">•</span>
+        <span id="status-version" class="status-version-text"></span>
+      </div>
+    </footer>
 
     <!-- Toast Notifications -->
     <div id="toast-container" class="toast-container"></div>

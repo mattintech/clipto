@@ -552,6 +552,10 @@
   // Render uploads list/grid
   function renderUploads() {
     uploadCountBadge.textContent = `${uploadedItems.length} item${uploadedItems.length === 1 ? '' : 's'}`;
+    const statusSessionCount = document.getElementById('status-session-count');
+    if (statusSessionCount) {
+      statusSessionCount.textContent = `${uploadedItems.length} upload${uploadedItems.length === 1 ? '' : 's'}`;
+    }
 
     if (uploadedItems.length === 0) {
       uploadsList.innerHTML = '<div class="empty-state">No files uploaded yet in this session.</div>';
@@ -1309,6 +1313,10 @@
       if (dirDisplay) {
         dirDisplay.textContent = currentDir;
       }
+      const statusDir = document.getElementById('status-dir');
+      if (statusDir) {
+        statusDir.textContent = currentDir;
+      }
       if (btnDir) {
         btnDir.title = `Destination Directory: ${currentDir} (click to copy)`;
         btnDir.setAttribute('aria-label', `Directory: ${currentDir}`);
@@ -1322,6 +1330,10 @@
         const versionEl = document.getElementById('app-version');
         if (versionEl) {
           versionEl.textContent = `v${data.version}`;
+        }
+        const statusVersion = document.getElementById('status-version');
+        if (statusVersion) {
+          statusVersion.textContent = `v${data.version}`;
         }
       }
 
@@ -1475,7 +1487,28 @@
         uploadPanelHeading.textContent = `Uploads (${allItems.length} completed)`;
       }
     }
+
+    // Sync persistent bottom status bar indicator
+    const statusUploadIndicator = document.getElementById('status-upload-indicator');
+    const statusUploadSummary = document.getElementById('status-upload-summary');
+    if (statusUploadIndicator && statusUploadSummary) {
+      if (activeItems.length > 0) {
+        statusUploadIndicator.classList.remove('hidden');
+        statusUploadSummary.textContent = `Uploading (${activeItems.length})...`;
+      } else {
+        statusUploadIndicator.classList.add('hidden');
+      }
+    }
+
     updateBeforeUnloadGuard();
+  }
+
+  const statusUploadIndicator = document.getElementById('status-upload-indicator');
+  if (statusUploadIndicator) {
+    statusUploadIndicator.addEventListener('click', () => {
+      uploadPanel.classList.remove('hidden');
+      uploadPanel.classList.remove('minimized');
+    });
   }
 
   if (uploadPanelToggle) {
@@ -1770,35 +1803,185 @@
     }, 6000);
   }
 
+  // Upload small file directly with live progress tracking, speed, and cancel support
+  function uploadSmallFile(file, isGist = false) {
+    return new Promise((resolve, reject) => {
+      const uploadId = (window.crypto && crypto.getRandomValues)
+        ? Array.from(crypto.getRandomValues(new Uint8Array(8))).map((b) => b.toString(16).padStart(2, '0')).join('')
+        : 'sf_' + Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
+
+      uploadPanel.classList.remove('hidden');
+      const itemEl = document.createElement('div');
+      itemEl.className = 'upload-item';
+      itemEl.id = `upload-item-${uploadId}`;
+      itemEl.innerHTML = `
+        <div class="upload-item-header">
+          <div class="upload-item-name" title="${escapeHtml(file.name)}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+            <span>${escapeHtml(file.name)}</span>
+          </div>
+          <div class="upload-item-actions">
+            <button class="upload-item-cancel" title="Cancel upload">✕</button>
+          </div>
+        </div>
+        <div class="upload-item-bar-wrap">
+          <div class="upload-item-bar" style="width: 0%"></div>
+        </div>
+        <div class="upload-item-meta">
+          <span class="upload-item-progress">0 B / ${formatSize(file.size)} (0%)</span>
+          <span class="upload-item-speed">Starting...</span>
+        </div>
+      `;
+      uploadPanelList.prepend(itemEl);
+      updateUploadPanelHeader();
+
+      const barEl = itemEl.querySelector('.upload-item-bar');
+      const progressEl = itemEl.querySelector('.upload-item-progress');
+      const speedEl = itemEl.querySelector('.upload-item-speed');
+      const cancelBtn = itemEl.querySelector('.upload-item-cancel');
+
+      const xhr = new XMLHttpRequest();
+      const startTime = Date.now();
+      let lastTime = startTime;
+      let rollingSpeed = 0;
+
+      cancelBtn.addEventListener('click', () => {
+        xhr.abort();
+        itemEl.classList.add('failed');
+        itemEl.querySelector('.upload-item-meta').innerHTML = '<span class="upload-item-status-error">✕ Cancelled</span>';
+        cancelBtn.remove();
+        updateUploadPanelHeader();
+        reject(new Error('Upload cancelled'));
+      });
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.min(100, Math.round((e.loaded / e.total) * 100));
+          barEl.style.width = `${pct}%`;
+          progressEl.textContent = `${formatSize(e.loaded)} / ${formatSize(e.total)} (${pct}%)`;
+
+          const now = Date.now();
+          const dt = (now - lastTime) / 1000;
+          if (dt > 0.15) {
+            const instSpeed = e.loaded / (dt || 0.001);
+            rollingSpeed = rollingSpeed === 0 ? instSpeed : (rollingSpeed * 0.7 + instSpeed * 0.3);
+            lastTime = now;
+          }
+          if (rollingSpeed > 0 && e.loaded < e.total) {
+            speedEl.textContent = `${formatSize(rollingSpeed)}/s`;
+          } else {
+            speedEl.textContent = 'Saving...';
+          }
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status === 401) {
+          itemEl.classList.add('failed');
+          itemEl.querySelector('.upload-item-meta').innerHTML = '<span class="upload-item-status-error">Session expired</span>';
+          cancelBtn.remove();
+          updateUploadPanelHeader();
+          lockScreen.classList.remove('hidden');
+          showAuthError('Session expired. Please re-authenticate.');
+          reject(new Error('Unauthorized'));
+          return;
+        }
+
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const result = JSON.parse(xhr.responseText);
+            barEl.style.width = '100%';
+            itemEl.classList.add('completed');
+            itemEl.querySelector('.upload-item-meta').innerHTML = `
+              <span class="upload-item-status-done">✓ Completed (${formatSize(file.size)})</span>
+            `;
+            cancelBtn.remove();
+            updateUploadPanelHeader();
+            playSuccessChime();
+
+            if (result.saved_files && result.saved_files.length > 0) {
+              const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+              result.saved_files.forEach((sf) => {
+                uploadedItems.unshift({
+                  name: sf.name,
+                  size: sf.size,
+                  is_image: sf.is_image,
+                  path: sf.path,
+                  time: now,
+                });
+                showToast(`Saved ${sf.name}`);
+              });
+              renderUploads();
+              loadFiles();
+            }
+
+            if (isOnceMode) {
+              showToast('One-shot received! Server is shutting down.', 'info');
+              if (connectionStatus) {
+                connectionStatus.className = 'status-pill';
+                connectionStatus.querySelector('.status-text').textContent = 'Completed';
+              }
+            }
+
+            setTimeout(() => {
+              if (itemEl && itemEl.classList.contains('completed')) {
+                itemEl.style.opacity = '0';
+                setTimeout(() => {
+                  itemEl.remove();
+                  updateUploadPanelHeader();
+                }, 300);
+              }
+            }, 6000);
+
+            resolve(result);
+          } catch (err) {
+            reject(err);
+          }
+        } else {
+          itemEl.classList.add('failed');
+          let errMsg = `Server error (${xhr.status})`;
+          try {
+            const errObj = JSON.parse(xhr.responseText);
+            if (errObj && errObj.error) errMsg = errObj.error;
+          } catch (_) {}
+          itemEl.querySelector('.upload-item-meta').innerHTML = `<span class="upload-item-status-error">✕ ${escapeHtml(errMsg)}</span>`;
+          cancelBtn.remove();
+          updateUploadPanelHeader();
+          reject(new Error(errMsg));
+        }
+      };
+
+      xhr.onerror = () => {
+        itemEl.classList.add('failed');
+        itemEl.querySelector('.upload-item-meta').innerHTML = '<span class="upload-item-status-error">✕ Network error</span>';
+        cancelBtn.remove();
+        updateUploadPanelHeader();
+        reject(new Error('Network error'));
+      };
+
+      const formData = new FormData();
+      formData.append('files', file, file.name);
+      xhr.open('POST', isGist ? '/api/gist-upload' : '/api/upload');
+      xhr.send(formData);
+    });
+  }
+
   // Handle files (from input or drop)
   async function handleFiles(files) {
     if (!files || files.length === 0) return;
+    const fileList = Array.from(files);
 
-    const smallFiles = [];
-    const largeFiles = [];
-
-    for (const file of files) {
+    for (const file of fileList) {
       if (file.size > CHUNK_SIZE) {
-        largeFiles.push(file);
+        uploadChunkedFile(file).catch((err) => {
+          console.error(err);
+          showToast(`Upload failed for ${file.name}: ${err.message}`, 'error');
+        });
       } else {
-        smallFiles.push(file);
-      }
-    }
-
-    if (smallFiles.length > 0) {
-      const formData = new FormData();
-      for (const file of smallFiles) {
-        formData.append('files', file, file.name);
-      }
-      uploadFormData(formData);
-    }
-
-    for (const file of largeFiles) {
-      try {
-        await uploadChunkedFile(file);
-      } catch (err) {
-        console.error(err);
-        showToast(`Upload failed for ${file.name}: ${err.message}`, 'error');
+        uploadSmallFile(file).catch((err) => {
+          console.error(err);
+          showToast(`Upload failed for ${file.name}: ${err.message}`, 'error');
+        });
       }
     }
   }
@@ -1827,13 +2010,11 @@
             const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '');
             const filename = `clip_${dateStr}_${timeStr}.png`;
 
+            const fileFromBlob = new File([blob], filename, { type: blob.type });
             if (blob.size > CHUNK_SIZE) {
-              const fileFromBlob = new File([blob], filename, { type: blob.type });
               uploadChunkedFile(fileFromBlob);
             } else {
-              const formData = new FormData();
-              formData.append('files', blob, filename);
-              uploadFormData(formData);
+              uploadSmallFile(fileFromBlob);
             }
             break;
           }
