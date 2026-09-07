@@ -79,11 +79,11 @@ def start_cloudflare_tunnel(port: int, timeout: float = 18.0) -> Tuple[str, subp
         proc.terminate()
         raise TimeoutError("Timed out waiting for Cloudflare tunnel URL to establish.")
 
-    # Cloudflare Anycast edge needs 2-3 seconds for global DNS propagation of the
+    # Cloudflare Anycast edge needs 3-4 seconds for global DNS propagation of the
     # newly generated subdomain. Waiting ensures immediate local clicks don't hit
     # an unpropagated DNS record and poison the local resolver's negative cache (NXDOMAIN).
     if registered:
-        time.sleep(2.5)
+        time.sleep(3.5)
 
     return url, proc
 

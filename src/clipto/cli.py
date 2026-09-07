@@ -431,10 +431,15 @@ def main():
         is_ssl=server.is_ssl,
     )
 
+    # Start server thread first so it is actively accepting connections before browser connects
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+
     if args.open:
         active_key = server.get_current_auth_key()
         scheme = "https" if server.is_ssl else "http"
-        target_open = tunnel_url or f"{scheme}://localhost:{port}"
+        # Always open local server on the host machine where Clipto was launched
+        target_open = f"{scheme}://localhost:{port}"
         query_suffix = f"/?k={active_key}" if active_key else ""
         hash_suffix = ""
         if share_file:
@@ -442,10 +447,6 @@ def main():
         elif share_mode:
             hash_suffix = "#files"
         webbrowser.open(f"{target_open}{query_suffix}{hash_suffix}")
-
-    # Start server thread
-    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-    server_thread.start()
 
     start_time = time.time()
 
