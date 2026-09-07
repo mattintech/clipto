@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import urllib.parse
+from datetime import datetime
 from email.parser import BytesParser
 from email.policy import default
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -852,10 +853,11 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 return
 
             if getattr(self.server, "debug", False):
+                ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
                 dur_ms = (time.time() - t_chunk_start) * 1000
                 speed_mb = (content_length / (1024 * 1024)) / ((time.time() - t_chunk_start) or 0.001)
                 print(
-                    f"[DEBUG] Chunk {chunk_index + 1}/{total_chunks} ({content_length / (1024 * 1024):.2f}MB) "
+                    f"[{ts}] [DEBUG] Chunk {chunk_index + 1}/{total_chunks} ({content_length / (1024 * 1024):.2f}MB) "
                     f"for '{clean_name}' written to offset {offset} in {dur_ms:.1f}ms ({speed_mb:.1f} MB/s)",
                     file=sys.stderr,
                 )
