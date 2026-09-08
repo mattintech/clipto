@@ -138,13 +138,25 @@ class CliptoHTTPServer(ThreadingHTTPServer):
         with self.auth_lock:
             self.failed_auth_attempts[client_ip].append(now)
 
+    def handle_error(self, request, client_address):
+        """Suppress noisy broken pipe / connection reset tracebacks when clients abort or disconnect."""
+        exc_type, exc_val, _ = sys.exc_info()
+        if exc_type in (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
+        if isinstance(exc_val, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+            return
+        super().handle_error(request, client_address)
+
     def finish_request(self, request, client_address):
         try:
             request.settimeout(60.0)
         except Exception:
             pass
         if not self.is_ssl or not self.ssl_context:
-            super().finish_request(request, client_address)
+            try:
+                super().finish_request(request, client_address)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
             return
 
         import ssl
@@ -328,19 +340,31 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
 
         return False
 
+    def handle(self):
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
+
     def send_json(self, status: int, data: dict, cookie: Optional[str] = None):
         body = json.dumps(data).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        if cookie:
-            self.send_header("Set-Cookie", cookie)
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            if cookie:
+                self.send_header("Set-Cookie", cookie)
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def serve_file(self, file_path: Path):
         if not file_path.is_file():
-            self.send_error(404, "File Not Found")
+            try:
+                self.send_error(404, "File Not Found")
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
             return
 
         content_type, _ = mimetypes.guess_type(str(file_path))
@@ -349,16 +373,19 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
         elif file_path.suffix == ".js":
             content_type = "application/javascript"
 
-        content = file_path.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", content_type or "application/octet-stream")
-        self.send_header("Content-Length", str(len(content)))
-        if file_path.suffix.lower() in {".html", ".js", ".css"}:
-            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-            self.send_header("Pragma", "no-cache")
-            self.send_header("Expires", "0")
-        self.end_headers()
-        self.wfile.write(content)
+        try:
+            content = file_path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type or "application/octet-stream")
+            self.send_header("Content-Length", str(len(content)))
+            if file_path.suffix.lower() in {".html", ".js", ".css"}:
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
+            self.end_headers()
+            self.wfile.write(content)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def do_GET(self):
         web_dir = get_web_dir()
@@ -848,6 +875,8 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                             break
                         f.write(chunk_bytes)
                         remaining -= len(chunk_bytes)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                return
             except Exception as e:
                 self.send_json(500, {"error": f"Failed writing chunk: {e}"})
                 return
