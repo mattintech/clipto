@@ -103,7 +103,7 @@ clipto my_script.py
 Clipto formats a direct `curl` command right in the terminal banner:
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
-│ 📎 Clipto v0.3.0 [SHARING FILE]                                        │
+│ 📎 Clipto v0.3.1 [SHARING FILE]                                        │
 │ File:       deploy.sh (3.2 KB)                                         │
 │ Directory:  /Users/matt/code/project                                   │
 │ Config:     /Users/matt/.clipto/config.json                            │
