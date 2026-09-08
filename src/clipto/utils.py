@@ -5,6 +5,7 @@ import socket
 import subprocess
 import sys
 import unicodedata
+import urllib.parse
 from pathlib import Path
 from typing import Optional
 
@@ -93,6 +94,18 @@ def sanitize_filename(filename: str, default_name: str = "upload") -> str:
     filename = filename.strip(". ")
     return filename or default_name
 
+
+def format_content_disposition(disposition_type: str, filename: str) -> str:
+    """
+    Format a Content-Disposition header safely according to RFC 6266 and RFC 5987.
+    Prevents header injection (CRLF), quote breakouts, and UnicodeEncodeError in HTTP headers.
+    """
+    cleaned = re.sub(r"[\r\n\x00]", "", filename).strip()
+    if not cleaned:
+        cleaned = "download"
+    ascii_name = cleaned.replace('"', '_').encode("ascii", "replace").decode("ascii")
+    utf8_name = urllib.parse.quote(cleaned, encoding="utf-8")
+    return f'{disposition_type}; filename="{ascii_name}"; filename*=UTF-8\'\'{utf8_name}'
 
 
 def get_unique_path(directory: Path, filename: str) -> Path:

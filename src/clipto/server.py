@@ -21,6 +21,7 @@ from typing import List, Optional, Set
 import clipto
 from clipto.totp import calculate_totp, verify_totp
 from clipto.utils import (
+    format_content_disposition,
     get_local_ip,
     get_tailscale_ip,
     get_unique_path,
@@ -346,6 +347,15 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
 
+    def end_headers(self):
+        has_nosniff = any(
+            b"x-content-type-options" in h.lower()
+            for h in getattr(self, "_headers_buffer", [])
+        )
+        if not has_nosniff:
+            self.send_header("X-Content-Type-Options", "nosniff")
+        super().end_headers()
+
     def send_json(self, status: int, data: dict, cookie: Optional[str] = None):
         body = json.dumps(data).encode("utf-8")
         try:
@@ -475,6 +485,7 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Security-Policy", "default-src 'none'; sandbox")
             self.end_headers()
             self.wfile.write(body)
         elif path == "/api/files":
@@ -646,12 +657,32 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
 
             stat = target.stat()
             is_text = is_text_file(target)
-            content_type = "text/plain; charset=utf-8" if is_text else (mimetypes.guess_type(str(target))[0] or "application/octet-stream")
+            suffix_lower = target.suffix.lower()
+
+            if suffix_lower in {".html", ".htm", ".xhtml", ".xml"}:
+                content_type = "text/plain; charset=utf-8"
+                csp = "default-src 'none'; sandbox"
+                disposition = format_content_disposition("inline", target.name)
+            elif suffix_lower == ".svg":
+                content_type = "image/svg+xml; charset=utf-8"
+                csp = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+                disposition = format_content_disposition("attachment", target.name)
+            elif is_text:
+                content_type = "text/plain; charset=utf-8"
+                csp = "default-src 'none'; sandbox"
+                disposition = format_content_disposition("inline", target.name)
+            else:
+                content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+                if content_type.startswith("text/html"):
+                    content_type = "application/octet-stream"
+                csp = None
+                disposition = format_content_disposition("attachment", target.name)
 
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(stat.st_size))
-            disposition = "inline" if is_text else f'attachment; filename="{target.name}"'
+            if csp:
+                self.send_header("Content-Security-Policy", csp)
             self.send_header("Content-Disposition", disposition)
             self.end_headers()
 
@@ -700,7 +731,42 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 self.send_error(404, "File Not Found")
                 return
 
-            self.serve_file(target)
+            stat = target.stat()
+            suffix_lower = target.suffix.lower()
+
+            if suffix_lower in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico"}:
+                content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(stat.st_size))
+                self.send_header("Content-Disposition", format_content_disposition("inline", target.name))
+                self.end_headers()
+            elif suffix_lower == ".svg":
+                # Sandboxed SVG serving to prevent script execution if viewed directly
+                self.send_response(200)
+                self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
+                self.send_header("Content-Length", str(stat.st_size))
+                self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+                self.send_header("Content-Disposition", format_content_disposition("inline", target.name))
+                self.end_headers()
+            else:
+                # Non-image files requested via /api/file must NOT be served as executable HTML
+                is_text = is_text_file(target)
+                content_type = "text/plain; charset=utf-8" if is_text else (mimetypes.guess_type(str(target))[0] or "application/octet-stream")
+                if content_type.startswith("text/html"):
+                    content_type = "text/plain; charset=utf-8"
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(stat.st_size))
+                self.send_header("Content-Security-Policy", "default-src 'none'; sandbox")
+                self.send_header("Content-Disposition", format_content_disposition("attachment", target.name))
+                self.end_headers()
+
+            try:
+                with open(target, "rb") as f:
+                    shutil.copyfileobj(f, self.wfile)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
         else:
             self.send_error(404, "Not Found")
 

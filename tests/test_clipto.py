@@ -13,6 +13,7 @@ from unittest.mock import patch
 from clipto.server import CliptoHTTPServer, CliptoRequestHandler
 from clipto.utils import (
     find_available_port,
+    format_content_disposition,
     get_config_file,
     get_unique_path,
     load_global_config,
@@ -51,6 +52,28 @@ class TestCliptoUtils(unittest.TestCase):
 
         f3 = get_unique_path(self.temp_dir, "test.txt")
         self.assertEqual(f3.name, "test (2).txt")
+
+    def test_format_content_disposition(self):
+        # 1. Standard filename
+        h1 = format_content_disposition("attachment", "document.pdf")
+        self.assertEqual(h1, 'attachment; filename="document.pdf"; filename*=UTF-8\'\'document.pdf')
+
+        # 2. Filename with quotes
+        h2 = format_content_disposition("attachment", 'my "report".pdf')
+        self.assertEqual(h2, 'attachment; filename="my _report_.pdf"; filename*=UTF-8\'\'my%20%22report%22.pdf')
+
+        # 3. Filename with CRLF and null characters
+        h3 = format_content_disposition("attachment", "test\r\n\x00inject.txt")
+        self.assertEqual(h3, 'attachment; filename="testinject.txt"; filename*=UTF-8\'\'testinject.txt')
+
+        # 4. Unicode / non-ASCII filename
+        h4 = format_content_disposition("attachment", "日本語_photo.png")
+        self.assertNotIn("日本語", h4.split('; filename=')[1].split(';')[0])
+        self.assertIn("filename*=UTF-8''%E6%97%A5%E6%9C%AC%E8%AA%9E_photo.png", h4)
+
+        # 5. Empty filename fallback
+        h5 = format_content_disposition("attachment", "   ")
+        self.assertEqual(h5, 'attachment; filename="download"; filename*=UTF-8\'\'download')
 
     def test_find_available_port(self):
         port = find_available_port(0)
@@ -1205,6 +1228,84 @@ class TestCliptoServer(unittest.TestCase):
         # Separate -d <path> should still work
         args_dir = parser.parse_args(["-d", "/tmp"])
         self.assertEqual(str(args_dir.dir), "/tmp")
+
+    def test_security_headers_nosniff(self):
+        # /api/health
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/health") as resp:
+            self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
+
+        # / (index.html)
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/") as resp:
+            self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
+
+        # /api/qr
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/qr") as resp:
+            self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
+            self.assertIn("sandbox", resp.headers.get("Content-Security-Policy", ""))
+
+    def test_svg_serving_security(self):
+        svg_file = self.temp_dir / "test_vector.svg"
+        svg_file.write_text('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')
+
+        # /api/file should serve SVG with CSP sandbox and nosniff
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/file?name=test_vector.svg") as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(resp.headers.get("Content-Type"), "image/svg+xml; charset=utf-8")
+            self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
+            csp = resp.headers.get("Content-Security-Policy", "")
+            self.assertIn("sandbox", csp)
+            self.assertIn("default-src 'none'", csp)
+            self.assertIn("inline", resp.headers.get("Content-Disposition", ""))
+
+        # /raw/ should serve SVG with attachment disposition and CSP sandbox
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/raw/test_vector.svg") as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
+            csp = resp.headers.get("Content-Security-Policy", "")
+            self.assertIn("sandbox", csp)
+            self.assertIn("attachment", resp.headers.get("Content-Disposition", ""))
+
+    def test_html_file_serving_security(self):
+        html_file = self.temp_dir / "malicious.html"
+        html_file.write_text('<!DOCTYPE html><html><script>alert("xss")</script></html>')
+
+        # /api/file must NEVER serve uploaded file as text/html
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/file?name=malicious.html") as resp:
+            self.assertEqual(resp.status, 200)
+            content_type = resp.headers.get("Content-Type", "")
+            self.assertNotIn("text/html", content_type)
+            self.assertIn("attachment", resp.headers.get("Content-Disposition", ""))
+            self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
+            self.assertIn("sandbox", resp.headers.get("Content-Security-Policy", ""))
+
+        # /raw/ must serve as text/plain with sandbox CSP, never text/html
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/raw/malicious.html") as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertIn("text/plain", resp.headers.get("Content-Type", ""))
+            self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
+            self.assertIn("sandbox", resp.headers.get("Content-Security-Policy", ""))
+
+    def test_unicode_filename_download(self):
+        unicode_name = "日本語_document.txt"
+        uni_file = self.temp_dir / unicode_name
+        uni_file.write_text("Hello from Unicode file")
+
+        # Download via /raw/
+        raw_url = f"http://127.0.0.1:{self.port}/raw/{urllib.parse.quote(unicode_name)}"
+        with urllib.request.urlopen(raw_url) as resp:
+            self.assertEqual(resp.status, 200)
+            cd = resp.headers.get("Content-Disposition", "")
+            self.assertIn("filename*=", cd)
+            self.assertIn(urllib.parse.quote(unicode_name), cd)
+            self.assertEqual(resp.read().decode(), "Hello from Unicode file")
+
+        # Download via /api/file
+        api_url = f"http://127.0.0.1:{self.port}/api/file?name={urllib.parse.quote(unicode_name)}"
+        with urllib.request.urlopen(api_url) as resp:
+            self.assertEqual(resp.status, 200)
+            cd = resp.headers.get("Content-Disposition", "")
+            self.assertIn("filename*=", cd)
+            self.assertEqual(resp.read().decode(), "Hello from Unicode file")
 
 
 if __name__ == "__main__":
