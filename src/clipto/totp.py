@@ -11,7 +11,7 @@ import sys
 import time
 import urllib.parse
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Set, Tuple
 
 from clipto.utils import render_qr_terminal
 
@@ -91,10 +91,12 @@ def verify_totp(
     step: int = 30,
     digits: int = 6,
     window: int = 1,
+    used_steps: Optional[Set[int]] = None,
 ) -> bool:
     """
     Verify a TOTP code with a ±1 time step tolerance window (30s past and 30s future)
     to gracefully handle minor clock drift between the server and phone.
+    Optionally records and checks used_steps to prevent replay attacks (RFC 6238 §5.2).
     """
     if not code or len(code.strip()) != digits:
         return False
@@ -103,9 +105,23 @@ def verify_totp(
     if timestamp is None:
         timestamp = time.time()
 
+    current_counter = int(timestamp // step)
+
+    # Clean up counters older than validity window from used_steps to bound memory
+    if used_steps is not None:
+        min_valid_counter = current_counter - window - 2
+        for old in list(used_steps):
+            if old < min_valid_counter:
+                used_steps.discard(old)
+
     for offset in range(-window, window + 1):
-        expected = calculate_totp(secret_b32, timestamp=timestamp + (offset * step), step=step, digits=digits)
+        counter = current_counter + offset
+        if used_steps is not None and counter in used_steps:
+            continue
+        expected = calculate_totp(secret_b32, timestamp=counter * step, step=step, digits=digits)
         if hmac.compare_digest(expected, code_clean):
+            if used_steps is not None:
+                used_steps.add(counter)
             return True
 
     return False

@@ -1,3 +1,4 @@
+import http.cookies
 import io
 import json
 import shutil
@@ -487,6 +488,22 @@ class TestCliptoServer(unittest.TestCase):
         self.assertTrue(verify_totp(secret, curr_code, timestamp=now))
         self.assertFalse(verify_totp(secret, "000000", timestamp=now))
 
+        # Replay prevention with used_steps
+        used_steps = set()
+        self.assertTrue(verify_totp(secret, curr_code, timestamp=now, used_steps=used_steps))
+        self.assertIn(int(now // 30), used_steps)
+        # Immediate replay of the same code fails
+        self.assertFalse(verify_totp(secret, curr_code, timestamp=now, used_steps=used_steps))
+        # Replay of the same code in adjacent window (+30s) also fails
+        self.assertFalse(verify_totp(secret, curr_code, timestamp=now + 30, used_steps=used_steps))
+
+        # Memory cleanup: stale steps older than drift window are automatically pruned
+        stale_counter = int(now // 30) - 10
+        used_steps.add(stale_counter)
+        future_code = calculate_totp(secret, timestamp=now + 60)
+        self.assertTrue(verify_totp(secret, future_code, timestamp=now + 60, used_steps=used_steps))
+        self.assertNotIn(stale_counter, used_steps)
+
         # Test URI
         uri = get_totp_uri(secret, issuer="Clipto", account="test@box")
         self.assertTrue(uri.startswith("otpauth://totp/Clipto%3Atest%40box?"))
@@ -531,6 +548,37 @@ class TestCliptoServer(unittest.TestCase):
                 self.assertEqual(resp.status, 200)
                 cookie = resp.headers.get("Set-Cookie")
                 self.assertIn("clipto_auth=", cookie)
+
+            # 3. Replay attack: submitting the same TOTP code again fails with 401
+            auth_req_replay = urllib.request.Request(
+                f"http://127.0.0.1:{totp_port}/api/auth",
+                data=json.dumps({"key": code}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(auth_req_replay)
+                self.fail("Expected 401 on replayed TOTP code")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 401)
+
+            # 4. Replaying the same TOTP code via ?k= query parameter also fails
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{totp_port}/api/info?k={code}")
+                self.fail("Expected 401 on replayed TOTP code in query param")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 401)
+
+            # 5. Replaying the same TOTP code via Bearer header also fails
+            bearer_req = urllib.request.Request(
+                f"http://127.0.0.1:{totp_port}/api/info",
+                headers={"Authorization": f"Bearer {code}"},
+            )
+            try:
+                urllib.request.urlopen(bearer_req)
+                self.fail("Expected 401 on replayed TOTP code in Bearer header")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 401)
 
         finally:
             totp_server.shutdown()
@@ -1442,6 +1490,249 @@ class TestCliptoServer(unittest.TestCase):
             with self.server.chunk_lock:
                 self.server.active_chunk_uploads.clear()
                 self.server.active_chunk_uploads.update(old_uploads)
+
+    def test_auth_logout_and_session_ttl(self):
+        auth_dir = Path(tempfile.mkdtemp())
+        auth_port = find_available_port(0)
+        auth_token = "secret_pin_test_987"
+        auth_server = CliptoHTTPServer(
+            ("127.0.0.1", auth_port),
+            CliptoRequestHandler,
+            upload_dir=auth_dir,
+            title="Auth Session",
+            once=False,
+            auth_token=auth_token,
+        )
+        auth_thread = threading.Thread(target=auth_server.serve_forever, daemon=True)
+        auth_thread.start()
+        time.sleep(0.1)
+
+        try:
+            # 1. Unauthenticated request returns 401
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{auth_port}/api/info")
+                self.fail("Expected 401 unauthenticated")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 401)
+
+            # 2. Authenticate via POST /api/auth
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{auth_port}/api/auth",
+                data=json.dumps({"key": auth_token}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req) as resp:
+                self.assertEqual(resp.status, 200)
+                cookie_header = resp.headers.get("Set-Cookie", "")
+                self.assertIn("clipto_auth=", cookie_header)
+                # Plain HTTP should not have Secure flag
+                self.assertNotIn("Secure", cookie_header)
+
+            token = http.cookies.SimpleCookie(cookie_header)["clipto_auth"].value
+            self.assertIn(token, auth_server.authenticated_sessions)
+
+            # 3. Access protected endpoint with cookie returns 200
+            info_req = urllib.request.Request(
+                f"http://127.0.0.1:{auth_port}/api/info",
+                headers={"Cookie": f"clipto_auth={token}"},
+            )
+            with urllib.request.urlopen(info_req) as resp:
+                self.assertEqual(resp.status, 200)
+
+            # 4. POST /api/logout invalidates session and clears cookie
+            logout_req = urllib.request.Request(
+                f"http://127.0.0.1:{auth_port}/api/logout",
+                headers={"Cookie": f"clipto_auth={token}"},
+                method="POST",
+            )
+            with urllib.request.urlopen(logout_req) as resp:
+                self.assertEqual(resp.status, 200)
+                logout_cookie = resp.headers.get("Set-Cookie", "")
+                self.assertIn("Max-Age=0", logout_cookie)
+                self.assertIn("Expires=Thu, 01 Jan 1970", logout_cookie)
+
+            # Session token must be deleted from server authenticated_sessions
+            self.assertNotIn(token, auth_server.authenticated_sessions)
+
+            # 5. Subsequent request with old cookie returns 401
+            try:
+                urllib.request.urlopen(info_req)
+                self.fail("Expected 401 after logout")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 401)
+
+            # 6. Test GET /api/logout also works
+            with urllib.request.urlopen(req) as resp:
+                new_token = http.cookies.SimpleCookie(resp.headers.get("Set-Cookie"))["clipto_auth"].value
+            self.assertIn(new_token, auth_server.authenticated_sessions)
+
+            get_logout_req = urllib.request.Request(
+                f"http://127.0.0.1:{auth_port}/api/logout",
+                headers={"Cookie": f"clipto_auth={new_token}"},
+                method="GET",
+            )
+            with urllib.request.urlopen(get_logout_req) as resp:
+                self.assertEqual(resp.status, 200)
+            self.assertNotIn(new_token, auth_server.authenticated_sessions)
+
+            # 7. Session TTL: sessions older than 7 days are rejected and pruned
+            stale_token = "stale_token_test_123"
+            with auth_server.auth_lock:
+                auth_server.authenticated_sessions[stale_token] = time.time() - (86400 * 8)
+            stale_req = urllib.request.Request(
+                f"http://127.0.0.1:{auth_port}/api/info",
+                headers={"Cookie": f"clipto_auth={stale_token}"},
+            )
+            try:
+                urllib.request.urlopen(stale_req)
+                self.fail("Expected 401 for expired session")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 401)
+            self.assertNotIn(stale_token, auth_server.authenticated_sessions)
+
+        finally:
+            auth_server.shutdown()
+            auth_server.server_close()
+            shutil.rmtree(auth_dir, ignore_errors=True)
+
+    def test_reverse_proxy_rate_limiting_and_secure_cookie(self):
+        proxy_dir = Path(tempfile.mkdtemp())
+        proxy_port = find_available_port(0)
+        auth_token = "proxy_secret_456"
+        proxy_server = CliptoHTTPServer(
+            ("127.0.0.1", proxy_port),
+            CliptoRequestHandler,
+            upload_dir=proxy_dir,
+            title="Proxy Session",
+            once=False,
+            auth_token=auth_token,
+        )
+        proxy_thread = threading.Thread(target=proxy_server.serve_forever, daemon=True)
+        proxy_thread.start()
+        time.sleep(0.1)
+
+        try:
+            # 1. CF-Connecting-IP rate limiting isolation:
+            # Bad client IP sends 5 failed attempts
+            bad_ip = "198.51.100.25"
+            for _ in range(5):
+                req = urllib.request.Request(
+                    f"http://127.0.0.1:{proxy_port}/api/auth",
+                    data=json.dumps({"key": "wrong_key"}).encode(),
+                    headers={"Content-Type": "application/json", "CF-Connecting-IP": bad_ip},
+                    method="POST",
+                )
+                try:
+                    urllib.request.urlopen(req)
+                except urllib.error.HTTPError as e:
+                    self.assertEqual(e.code, 401)
+
+            # 6th attempt from bad_ip receives 429
+            req_locked = urllib.request.Request(
+                f"http://127.0.0.1:{proxy_port}/api/auth",
+                data=json.dumps({"key": "wrong_key"}).encode(),
+                headers={"Content-Type": "application/json", "CF-Connecting-IP": bad_ip},
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(req_locked)
+                self.fail("Expected 429 for rate-limited proxy IP")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 429)
+
+            # Different client IP is NOT rate-limited (proves 127.0.0.1 is not locked out)
+            good_ip = "203.0.113.88"
+            req_good = urllib.request.Request(
+                f"http://127.0.0.1:{proxy_port}/api/auth",
+                data=json.dumps({"key": "wrong_key"}).encode(),
+                headers={"Content-Type": "application/json", "CF-Connecting-IP": good_ip},
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(req_good)
+                self.fail("Expected 401 for valid attempts from new IP")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 401)
+
+            # 2. X-Forwarded-For parsing: extracts first IP
+            xff_ip = "192.0.2.77"
+            for _ in range(5):
+                req = urllib.request.Request(
+                    f"http://127.0.0.1:{proxy_port}/api/auth",
+                    data=json.dumps({"key": "wrong_key"}).encode(),
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Forwarded-For": f"{xff_ip}, 10.0.0.1, 10.0.0.2",
+                    },
+                    method="POST",
+                )
+                try:
+                    urllib.request.urlopen(req)
+                except urllib.error.HTTPError as e:
+                    self.assertEqual(e.code, 401)
+
+            req_xff_locked = urllib.request.Request(
+                f"http://127.0.0.1:{proxy_port}/api/auth",
+                data=json.dumps({"key": "wrong_key"}).encode(),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Forwarded-For": f"{xff_ip}, 10.0.0.1",
+                },
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(req_xff_locked)
+                self.fail("Expected 429 for rate-limited X-Forwarded-For IP")
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 429)
+
+            # 3. Non-localhost peer does NOT trust forwarded headers
+            class DummyHandler:
+                def __init__(self, peer, headers):
+                    self.client_address = (peer, 12345)
+                    self.headers = headers
+                get_client_ip = CliptoRequestHandler.get_client_ip
+
+            dummy_remote = DummyHandler(
+                "192.168.1.50",
+                {"CF-Connecting-IP": "8.8.8.8", "X-Forwarded-For": "1.1.1.1"},
+            )
+            self.assertEqual(dummy_remote.get_client_ip(), "192.168.1.50")
+
+            dummy_local = DummyHandler(
+                "127.0.0.1",
+                {"CF-Connecting-IP": "8.8.8.8"},
+            )
+            self.assertEqual(dummy_local.get_client_ip(), "8.8.8.8")
+
+            # 4. Cookie Secure attribute when X-Forwarded-Proto is https
+            https_auth_req = urllib.request.Request(
+                f"http://127.0.0.1:{proxy_port}/api/auth",
+                data=json.dumps({"key": auth_token}).encode(),
+                headers={"Content-Type": "application/json", "X-Forwarded-Proto": "https"},
+                method="POST",
+            )
+            with urllib.request.urlopen(https_auth_req) as resp:
+                self.assertEqual(resp.status, 200)
+                cookie_header = resp.headers.get("Set-Cookie", "")
+                self.assertIn("; Secure", cookie_header)
+                token = http.cookies.SimpleCookie(cookie_header)["clipto_auth"].value
+
+            https_logout_req = urllib.request.Request(
+                f"http://127.0.0.1:{proxy_port}/api/logout",
+                headers={"Cookie": f"clipto_auth={token}", "X-Forwarded-Proto": "https"},
+                method="POST",
+            )
+            with urllib.request.urlopen(https_logout_req) as resp:
+                self.assertEqual(resp.status, 200)
+                logout_cookie = resp.headers.get("Set-Cookie", "")
+                self.assertIn("; Secure", logout_cookie)
+
+        finally:
+            proxy_server.shutdown()
+            proxy_server.server_close()
+            shutil.rmtree(proxy_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ from email.parser import BytesParser
 from email.policy import default
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import Dict, List, Optional, Set
 
 import clipto
 from clipto.totp import calculate_totp, verify_totp
@@ -107,7 +107,8 @@ class CliptoHTTPServer(ThreadingHTTPServer):
         self.uploaded_files: List[Path] = []
         self.shutdown_event = threading.Event()
         self.failed_auth_attempts = collections.defaultdict(list)
-        self.authenticated_sessions: Set[str] = set()
+        self.authenticated_sessions: Dict[str, float] = {}
+        self.used_totp_steps: Set[int] = set()
         self.auth_lock = threading.Lock()
         self.active_chunk_uploads = {}
         self.chunk_lock = threading.Lock()
@@ -283,11 +284,27 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
         # Suppress verbose standard logging to keep terminal clean
         pass
 
+    def get_client_ip(self) -> str:
+        """
+        Determine effective client IP.
+        When peer is localhost (e.g. cloudflared quick tunnel or reverse proxy),
+        use CF-Connecting-IP or first IP in X-Forwarded-For to prevent locking out 127.0.0.1.
+        """
+        peer_ip = self.client_address[0]
+        if peer_ip in ("127.0.0.1", "::1", "localhost"):
+            cf_ip = self.headers.get("CF-Connecting-IP", "").strip()
+            if cf_ip:
+                return cf_ip
+            x_forwarded = self.headers.get("X-Forwarded-For", "").strip()
+            if x_forwarded:
+                return x_forwarded.split(",")[0].strip()
+        return peer_ip
+
     def is_authenticated(self) -> bool:
         if not self.server.auth_token and not self.server.totp_secret:
             return True
 
-        client_ip = self.client_address[0]
+        client_ip = self.get_client_ip()
         if self.server.is_rate_limited(client_ip):
             self._rate_limited = True
             return False
@@ -295,6 +312,13 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
         self._rate_limited = False
         credential_provided = False
         credential_valid = False
+
+        now = time.time()
+        with self.server.auth_lock:
+            # Purge expired sessions (7 day TTL)
+            expired = [tok for tok, created in self.server.authenticated_sessions.items() if now - created > 86400 * 7]
+            for tok in expired:
+                self.server.authenticated_sessions.pop(tok, None)
 
         # 1. Check Cookie: clipto_auth
         cookie_header = self.headers.get("Cookie", "")
@@ -314,8 +338,10 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
         if not credential_valid and "k" in query:
             credential_provided = True
             k = query["k"][0].strip()
-            if self.server.totp_secret and verify_totp(self.server.totp_secret, k):
-                credential_valid = True
+            if self.server.totp_secret:
+                with self.server.auth_lock:
+                    if verify_totp(self.server.totp_secret, k, used_steps=self.server.used_totp_steps):
+                        credential_valid = True
             elif self.server.auth_token and hmac.compare_digest(k, self.server.auth_token):
                 credential_valid = True
 
@@ -327,8 +353,10 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
             with self.server.auth_lock:
                 if token in self.server.authenticated_sessions:
                     credential_valid = True
-            if not credential_valid and self.server.totp_secret and verify_totp(self.server.totp_secret, token):
-                credential_valid = True
+            if not credential_valid and self.server.totp_secret:
+                with self.server.auth_lock:
+                    if verify_totp(self.server.totp_secret, token, used_steps=self.server.used_totp_steps):
+                        credential_valid = True
             elif not credential_valid and self.server.auth_token and hmac.compare_digest(token, self.server.auth_token):
                 credential_valid = True
 
@@ -425,6 +453,29 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 "authenticated": is_authed,
                 "auth_type": auth_type,
             })
+            return
+
+        # Logout endpoint to invalidate session and clear cookie
+        if path == "/api/logout":
+            cookies = http.cookies.SimpleCookie(self.headers.get("Cookie", ""))
+            if "clipto_auth" in cookies:
+                token = cookies["clipto_auth"].value
+                with self.server.auth_lock:
+                    self.server.authenticated_sessions.pop(token, None)
+            auth_header = self.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:].strip()
+                with self.server.auth_lock:
+                    self.server.authenticated_sessions.pop(token, None)
+
+            is_https = (
+                self.server.is_ssl
+                or (self.server.tunnel_url and self.server.tunnel_url.startswith("https://"))
+                or self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+            )
+            secure_flag = "; Secure" if is_https else ""
+            expired_cookie = f"clipto_auth=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; SameSite=Strict; HttpOnly{secure_flag}"
+            self.send_json(200, {"status": "ok", "authenticated": False}, cookie=expired_cookie)
             return
 
         # Protected API endpoints
@@ -773,7 +824,7 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         # Auth verification endpoint
         if self.path == "/api/auth":
-            client_ip = self.client_address[0]
+            client_ip = self.get_client_ip()
             if self.server.is_rate_limited(client_ip):
                 self.send_json(429, {"error": "Too many failed attempts. Please wait 1 minute."})
                 return
@@ -786,19 +837,26 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
 
                 is_valid = False
                 if self.server.totp_secret:
-                    is_valid = verify_totp(self.server.totp_secret, provided_key)
+                    with self.server.auth_lock:
+                        is_valid = verify_totp(self.server.totp_secret, provided_key, used_steps=self.server.used_totp_steps)
                 elif self.server.auth_token:
                     is_valid = hmac.compare_digest(provided_key, self.server.auth_token)
                 else:
                     is_valid = True
 
                 if is_valid:
-                    # Generate session token and store
+                    # Generate session token and store creation timestamp
                     session_token = secrets.token_hex(20)
                     with self.server.auth_lock:
-                        self.server.authenticated_sessions.add(session_token)
+                        self.server.authenticated_sessions[session_token] = time.time()
 
-                    cookie_val = f"clipto_auth={session_token}; Path=/; SameSite=Strict; HttpOnly"
+                    is_https = (
+                        self.server.is_ssl
+                        or (self.server.tunnel_url and self.server.tunnel_url.startswith("https://"))
+                        or self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+                    )
+                    secure_flag = "; Secure" if is_https else ""
+                    cookie_val = f"clipto_auth={session_token}; Path=/; SameSite=Strict; HttpOnly{secure_flag}"
                     self.send_json(200, {"status": "ok", "authenticated": True}, cookie=cookie_val)
                 else:
                     self.server.record_failed_auth(client_ip)
@@ -806,6 +864,29 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                     self.send_json(401, {"error": err_msg, "authenticated": False})
             except Exception as e:
                 self.send_json(400, {"error": f"Invalid request: {e}"})
+            return
+
+        # Logout endpoint to invalidate session and clear cookie
+        if self.path == "/api/logout":
+            cookies = http.cookies.SimpleCookie(self.headers.get("Cookie", ""))
+            if "clipto_auth" in cookies:
+                token = cookies["clipto_auth"].value
+                with self.server.auth_lock:
+                    self.server.authenticated_sessions.pop(token, None)
+            auth_header = self.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:].strip()
+                with self.server.auth_lock:
+                    self.server.authenticated_sessions.pop(token, None)
+
+            is_https = (
+                self.server.is_ssl
+                or (self.server.tunnel_url and self.server.tunnel_url.startswith("https://"))
+                or self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+            )
+            secure_flag = "; Secure" if is_https else ""
+            expired_cookie = f"clipto_auth=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; SameSite=Strict; HttpOnly{secure_flag}"
+            self.send_json(200, {"status": "ok", "authenticated": False}, cookie=expired_cookie)
             return
 
         # Gist creation endpoint requires authentication

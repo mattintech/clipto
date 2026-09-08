@@ -139,6 +139,16 @@
   };
   let currentSettingsTabOrder = ['dropzone', 'files', 'gist'];
 
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   // Sound chime via Web Audio API (zero external assets)
   function playSuccessChime() {
     try {
@@ -577,7 +587,7 @@
         if (isImg) {
           mediaHtml = `
             <div class="grid-card-media" title="Click to enlarge">
-              <img src="${fileUrl}" alt="${item.name}" loading="lazy">
+              <img src="${fileUrl}" alt="${escapeHtml(item.name)}" loading="lazy">
             </div>
           `;
         } else {
@@ -591,7 +601,7 @@
         card.innerHTML = `
           ${mediaHtml}
           <div class="grid-card-body">
-            <span class="grid-card-name" title="${item.name}">${item.name}</span>
+            <span class="grid-card-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
             <div class="grid-card-meta">
               <span>${formatSize(item.size)}</span>
               <span>${item.time}</span>
@@ -612,7 +622,7 @@
 
         let thumbHtml = '';
         if (isImg) {
-          thumbHtml = `<img class="thumb-preview" src="${fileUrl}" alt="${item.name}" title="Click to enlarge">`;
+          thumbHtml = `<img class="thumb-preview" src="${fileUrl}" alt="${escapeHtml(item.name)}" title="Click to enlarge">`;
         } else {
           thumbHtml = `
             <div class="thumb-icon-placeholder">
@@ -625,7 +635,7 @@
           <div class="upload-item-left">
             ${thumbHtml}
             <div class="upload-item-info">
-              <span class="upload-item-name" title="${item.name}">${item.name}</span>
+              <span class="upload-item-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
               <span class="upload-item-meta">${formatSize(item.size)} • ${item.time}</span>
             </div>
           </div>
@@ -765,7 +775,7 @@
       const gistFiles = allFiles.filter((f) => f.is_gist);
       if (gistFiles.length > 0) {
         gistFileSelect.innerHTML = gistFiles
-          .map((f) => `<option value="${f.name}">${f.name}</option>`)
+          .map((f) => `<option value="${escapeHtml(f.name)}">${escapeHtml(f.name)}</option>`)
           .join('');
         if (currentGistFilename && gistFiles.some((f) => f.name === currentGistFilename)) {
           gistFileSelect.value = currentGistFilename;
@@ -774,7 +784,7 @@
         gistFileSelect.innerHTML = '<option value="">No gists created yet</option>';
       }
     } catch (err) {
-      filesListBody.innerHTML = `<tr><td colspan="4" class="empty-state" style="color: var(--danger)">Error loading files: ${err.message}</td></tr>`;
+      filesListBody.innerHTML = `<tr><td colspan="4" class="empty-state" style="color: var(--danger)">Error loading files: ${escapeHtml(err.message)}</td></tr>`;
     }
   }
 
@@ -814,7 +824,7 @@
         if (file.is_image) {
           mediaHtml = `
             <div class="grid-card-media" title="Click to enlarge image">
-              <img src="${file.raw_url}" alt="${file.name}" loading="lazy">
+              <img src="${escapeHtml(file.raw_url)}" alt="${escapeHtml(file.name)}" loading="lazy">
             </div>
           `;
         } else if (file.is_gist) {
@@ -825,7 +835,7 @@
           `;
         } else {
           mediaHtml = `
-            <div class="grid-card-media" title="Click to download ${file.name}">
+            <div class="grid-card-media" title="Click to download ${escapeHtml(file.name)}">
               ${getFileIconSvg(file, 34, 34)}
             </div>
           `;
@@ -837,7 +847,7 @@
           ${mediaHtml}
           <div class="grid-card-body">
             <div class="grid-card-header">
-              <span class="grid-card-name" title="${file.name}">${file.name}</span>
+              <span class="grid-card-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
               ${gistBadge}
             </div>
             <div class="grid-card-footer">
@@ -850,7 +860,7 @@
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
                   </button>
                 ` : ''}
-                <a href="${file.raw_url}" download="${file.name}" class="btn-card-action" title="Download ${file.name}">
+                <a href="${escapeHtml(file.raw_url)}" download="${escapeHtml(file.name)}" class="btn-card-action" title="Download ${escapeHtml(file.name)}">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                 </a>
                 <button class="btn-card-action" data-action="curl" title="Copy CLI curl command">
@@ -927,7 +937,7 @@
           `;
         }
         actionsHtml += `
-          <a href="${file.raw_url}" download="${file.name}" class="btn-action" title="Download raw file">
+          <a href="${escapeHtml(file.raw_url)}" download="${escapeHtml(file.name)}" class="btn-action" title="Download raw file">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
             <span>Download</span>
           </a>
@@ -941,7 +951,7 @@
 
         let iconOrThumb = '';
         if (file.is_image) {
-          iconOrThumb = `<img class="file-thumb-preview" src="${file.raw_url}" alt="${file.name}" title="Click to enlarge" loading="lazy">`;
+          iconOrThumb = `<img class="file-thumb-preview" src="${escapeHtml(file.raw_url)}" alt="${escapeHtml(file.name)}" title="Click to enlarge" loading="lazy">`;
         } else {
           iconOrThumb = getFileIconSvg(file);
         }
@@ -950,7 +960,7 @@
           <td>
             <div class="file-cell">
               ${iconOrThumb}
-              <a href="javascript:void(0)" class="file-name-link">${file.name}</a>
+              <a href="javascript:void(0)" class="file-name-link">${escapeHtml(file.name)}</a>
               ${gistTag}
             </div>
           </td>
@@ -1434,16 +1444,6 @@
   }
 
   const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB chunk size (comfortably under Cloudflare's 100MB limit)
-
-  function escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
 
   function formatDuration(seconds) {
     if (!seconds || seconds <= 0) return '< 5s';
