@@ -904,6 +904,14 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": "Invalid chunk index or total chunks"})
                 return
 
+            if total_chunks > 50000:
+                self.send_json(400, {"error": "Total chunks exceeds maximum limit of 50000"})
+                return
+
+            if chunk_size < 0 or chunk_size > 25 * 1024 * 1024:
+                self.send_json(400, {"error": "Invalid chunk size"})
+                return
+
             raw_filename = self.headers.get("X-Filename", "").strip()
             raw_filename = urllib.parse.unquote(raw_filename)
             if not raw_filename:
@@ -920,6 +928,29 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 return
 
             is_gist = self.headers.get("X-Is-Gist", "0").strip().lower() in ("1", "true", "yes")
+
+            # Check capacity and validate upload session BEFORE disk operations
+            with self.server.chunk_lock:
+                now = time.time()
+                # Purge stale uploads older than 1 hour
+                stale_ids = [uid for uid, st in self.server.active_chunk_uploads.items() if now - st.get("created_at", now) > 3600]
+                for uid in stale_ids:
+                    stale_info = self.server.active_chunk_uploads.pop(uid, None)
+                    if stale_info and stale_info.get("part_file") and stale_info["part_file"].is_file():
+                        try:
+                            stale_info["part_file"].unlink()
+                        except Exception:
+                            pass
+
+                if upload_id not in self.server.active_chunk_uploads:
+                    if len(self.server.active_chunk_uploads) >= 100:
+                        self.send_json(429, {"error": "Too many concurrent upload sessions in progress. Please try again later."})
+                        return
+                else:
+                    existing_session = self.server.active_chunk_uploads[upload_id]
+                    if existing_session.get("total_chunks") != total_chunks:
+                        self.send_json(400, {"error": "total_chunks does not match existing upload session"})
+                        return
 
             part_file = (self.server.upload_dir / f".clipto_part_{upload_id}").resolve()
             try:
@@ -954,16 +985,6 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
             prev_chunk_end = None
             with self.server.chunk_lock:
                 now = t_chunk_end
-                # Purge stale uploads older than 1 hour
-                stale_ids = [uid for uid, st in self.server.active_chunk_uploads.items() if now - st.get("created_at", now) > 3600]
-                for uid in stale_ids:
-                    stale_info = self.server.active_chunk_uploads.pop(uid, None)
-                    if stale_info and stale_info.get("part_file") and stale_info["part_file"].is_file():
-                        try:
-                            stale_info["part_file"].unlink()
-                        except Exception:
-                            pass
-
                 if upload_id not in self.server.active_chunk_uploads:
                     self.server.active_chunk_uploads[upload_id] = {
                         "chunks_received": set(),
@@ -1012,15 +1033,14 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 })
                 return
 
-            # All chunks received! Finalize file
+            # All chunks received! Finalize file atomically under chunk_lock
             with self.server.chunk_lock:
                 upload_info = self.server.active_chunk_uploads.pop(upload_id, None)
-
-            target_path = get_unique_path(self.server.upload_dir, clean_name)
-            try:
-                part_file.rename(target_path)
-            except Exception:
-                shutil.move(str(part_file), str(target_path))
+                target_path = get_unique_path(self.server.upload_dir, clean_name)
+                try:
+                    part_file.rename(target_path)
+                except Exception:
+                    shutil.move(str(part_file), str(target_path))
 
             if is_gist:
                 self.server.record_gist(target_path.name)

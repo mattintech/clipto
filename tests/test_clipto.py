@@ -41,6 +41,27 @@ class TestCliptoUtils(unittest.TestCase):
         self.assertEqual(sanitize_filename(".bashrc"), "bashrc")
         self.assertEqual(sanitize_filename("photo.png."), "photo.png")
 
+        # Windows reserved device names
+        self.assertEqual(sanitize_filename("CON.txt"), "_CON.txt")
+        self.assertEqual(sanitize_filename("prn"), "_prn")
+        self.assertEqual(sanitize_filename("aux.tar.gz"), "_aux.tar.gz")
+        self.assertEqual(sanitize_filename("com1.png"), "_com1.png")
+        self.assertEqual(sanitize_filename("LPT9.pdf"), "_LPT9.pdf")
+
+        # Unicode directional overrides and invisible characters
+        self.assertEqual(sanitize_filename("test\u202Egnp.exe"), "testgnp.exe")
+        self.assertEqual(sanitize_filename("hello\u200Bworld.txt"), "helloworld.txt")
+        self.assertEqual(sanitize_filename("hidden\uFEFFname.png"), "hiddenname.png")
+
+        # Filename length truncation preserving extension
+        long_name = "a" * 300 + ".jpg"
+        sanitized_long = sanitize_filename(long_name)
+        self.assertLessEqual(len(sanitized_long.encode("utf-8")), 240)
+        self.assertTrue(sanitized_long.endswith(".jpg"))
+
+        # Windows-style backslash traversal
+        self.assertEqual(sanitize_filename("..\\..\\secret.txt"), "secret.txt")
+
     def test_get_unique_path(self):
         f1 = get_unique_path(self.temp_dir, "test.txt")
         self.assertEqual(f1.name, "test.txt")
@@ -1306,6 +1327,121 @@ class TestCliptoServer(unittest.TestCase):
             cd = resp.headers.get("Content-Disposition", "")
             self.assertIn("filename*=", cd)
             self.assertEqual(resp.read().decode(), "Hello from Unicode file")
+
+    def test_chunk_upload_abuse_limits(self):
+        # 1. Total chunks exceeds 50000
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/upload-chunk",
+            data=b"chunk",
+            headers={
+                "Content-Type": "application/octet-stream",
+                "X-Upload-Id": "upload_excessive_chunks_1",
+                "X-Chunk-Index": "0",
+                "X-Total-Chunks": "50001",
+                "X-Chunk-Size": "5",
+                "X-Filename": "test.bin",
+            },
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(req)
+            self.fail("Expected 400 for excessive total_chunks")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 400)
+            data = json.loads(e.read().decode())
+            self.assertIn("exceeds maximum limit", data.get("error", ""))
+
+        # 2. Invalid chunk size
+        req_bad_sz = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/upload-chunk",
+            data=b"chunk",
+            headers={
+                "Content-Type": "application/octet-stream",
+                "X-Upload-Id": "upload_bad_chunk_size_1",
+                "X-Chunk-Index": "0",
+                "X-Total-Chunks": "2",
+                "X-Chunk-Size": str(30 * 1024 * 1024),
+                "X-Filename": "test.bin",
+            },
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(req_bad_sz)
+            self.fail("Expected 400 for chunk_size > 25MB")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 400)
+
+        # 3. Inconsistent total_chunks for existing session
+        req_first = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/upload-chunk",
+            data=b"first",
+            headers={
+                "Content-Type": "application/octet-stream",
+                "X-Upload-Id": "upload_inconsistent_session_1",
+                "X-Chunk-Index": "0",
+                "X-Total-Chunks": "3",
+                "X-Chunk-Size": "5",
+                "X-Filename": "consistent.bin",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req_first) as resp:
+            self.assertEqual(resp.status, 200)
+
+        req_tampered = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/upload-chunk",
+            data=b"second",
+            headers={
+                "Content-Type": "application/octet-stream",
+                "X-Upload-Id": "upload_inconsistent_session_1",
+                "X-Chunk-Index": "1",
+                "X-Total-Chunks": "5",  # Tampered total_chunks
+                "X-Chunk-Size": "5",
+                "X-Filename": "consistent.bin",
+            },
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(req_tampered)
+            self.fail("Expected 400 for tampered total_chunks in session")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 400)
+            data = json.loads(e.read().decode())
+            self.assertIn("does not match", data.get("error", ""))
+
+        # 4. Concurrency limit
+        with self.server.chunk_lock:
+            old_uploads = dict(self.server.active_chunk_uploads)
+            for i in range(100):
+                self.server.active_chunk_uploads[f"dummy_upload_{i:04d}"] = {
+                    "chunks_received": {0},
+                    "total_chunks": 2,
+                    "filename": "dummy.bin",
+                    "part_file": None,
+                    "created_at": time.time(),
+                }
+        try:
+            req_over_capacity = urllib.request.Request(
+                f"http://127.0.0.1:{self.port}/api/upload-chunk",
+                data=b"overflow",
+                headers={
+                    "Content-Type": "application/octet-stream",
+                    "X-Upload-Id": "upload_over_capacity_session_1",
+                    "X-Chunk-Index": "0",
+                    "X-Total-Chunks": "2",
+                    "X-Chunk-Size": "8",
+                    "X-Filename": "overflow.bin",
+                },
+                method="POST",
+            )
+            urllib.request.urlopen(req_over_capacity)
+            self.fail("Expected 429 for exceeding active chunk uploads capacity")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 429)
+        finally:
+            with self.server.chunk_lock:
+                self.server.active_chunk_uploads.clear()
+                self.server.active_chunk_uploads.update(old_uploads)
 
 
 if __name__ == "__main__":

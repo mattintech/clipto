@@ -86,12 +86,64 @@ def get_tailscale_ip() -> Optional[str]:
     return None
 
 
-def sanitize_filename(filename: str, default_name: str = "upload") -> str:
-    """Sanitize uploaded filenames to prevent path traversal, hidden files, and unsafe characters."""
+WINDOWS_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+}
+
+UNICODE_DANGEROUS_CHARS_REGEX = re.compile(
+    r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069\u200e\u200f\u061c\u200b-\u200d\ufeff\u00ad]"
+)
+
+
+def sanitize_filename(filename: str, default_name: str = "upload", max_bytes: int = 240) -> str:
+    """
+    Sanitize uploaded filenames to prevent path traversal, hidden files, unsafe characters,
+    Windows reserved device names, directional Unicode overrides (RLO), and excessive length.
+    """
+    if not filename:
+        return default_name
+
+    # 1. Normalize Unicode (NFC)
+    filename = unicodedata.normalize("NFC", str(filename))
+
+    # 2. Strip dangerous control, invisible, and bidirectional override characters
+    filename = UNICODE_DANGEROUS_CHARS_REGEX.sub("", filename)
+
+    # 3. Handle cross-platform path traversal separators (/ and \)
+    filename = filename.replace("\\", "/").split("/")[-1].strip()
     filename = os.path.basename(filename).strip()
-    filename = re.sub(r"[\x00-\x1f\x7f]", "", filename)
+
+    # 4. Replace filesystem unsafe characters
     filename = re.sub(r'[\\/:*?"<>|]', "_", filename)
+
+    # 5. Strip leading and trailing dots and spaces
     filename = filename.strip(". ")
+    if not filename:
+        return default_name
+
+    # 6. Neutralize Windows reserved device names (e.g. CON, NUL, COM1)
+    stem = filename.split(".")[0]
+    if stem.upper() in WINDOWS_RESERVED_NAMES:
+        filename = f"_{filename}"
+
+    # 7. Truncate stem to ensure UTF-8 byte length is within max_bytes, preserving extension
+    encoded = filename.encode("utf-8")
+    if len(encoded) > max_bytes:
+        dot_idx = filename.rfind(".")
+        if dot_idx > 0 and (len(filename) - dot_idx) <= 25:
+            stem = filename[:dot_idx]
+            suffix = filename[dot_idx:]
+        else:
+            stem = filename
+            suffix = ""
+        while stem and len((stem + suffix).encode("utf-8")) > max_bytes:
+            stem = stem[:-1]
+        filename = stem + suffix
+        if not filename or filename == suffix:
+            filename = default_name
+
     return filename or default_name
 
 
