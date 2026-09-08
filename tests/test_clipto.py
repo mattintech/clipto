@@ -1110,6 +1110,73 @@ class TestCliptoServer(unittest.TestCase):
             server.server_close()
             shutil.rmtree(chunk_dir, ignore_errors=True)
 
+    def test_chunked_upload_debug_logging(self):
+        chunk_dir = Path(tempfile.mkdtemp())
+        port = find_available_port(0)
+        server = CliptoHTTPServer(
+            ("127.0.0.1", port),
+            CliptoRequestHandler,
+            upload_dir=chunk_dir,
+            title="Debug Test",
+            once=False,
+            debug=True,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        time.sleep(0.1)
+
+        upload_id = "test_debug_upload_12345"
+        chunk0 = b"A" * 1024
+        chunk1 = b"B" * 1024
+
+        stderr_capture = io.StringIO()
+        try:
+            with patch("sys.stderr", stderr_capture):
+                # Upload chunk 0
+                req0 = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/api/upload-chunk",
+                    data=chunk0,
+                    headers={
+                        "Content-Type": "application/octet-stream",
+                        "X-Upload-Id": upload_id,
+                        "X-Chunk-Index": "0",
+                        "X-Total-Chunks": "2",
+                        "X-Chunk-Size": "1024",
+                        "X-Filename": "debug_test.bin",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req0) as resp:
+                    self.assertEqual(resp.status, 200)
+
+                time.sleep(0.06)
+
+                # Upload chunk 1
+                req1 = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/api/upload-chunk",
+                    data=chunk1,
+                    headers={
+                        "Content-Type": "application/octet-stream",
+                        "X-Upload-Id": upload_id,
+                        "X-Chunk-Index": "1",
+                        "X-Total-Chunks": "2",
+                        "X-Chunk-Size": "1024",
+                        "X-Filename": "debug_test.bin",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req1) as resp:
+                    self.assertEqual(resp.status, 200)
+
+            log_output = stderr_capture.getvalue()
+            self.assertIn("Chunk 1/2", log_output)
+            self.assertIn("Chunk 2/2", log_output)
+            self.assertIn("Completed upload 'debug_test.bin'", log_output)
+        finally:
+            server.shutdown()
+            server.server_close()
+            shutil.rmtree(chunk_dir, ignore_errors=True)
+
     def test_cli_debug_option(self):
         from clipto.cli import build_parser
         parser = build_parser()

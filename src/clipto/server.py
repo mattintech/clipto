@@ -881,19 +881,13 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 self.send_json(500, {"error": f"Failed writing chunk: {e}"})
                 return
 
-            if getattr(self.server, "debug", False):
-                ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                dur_ms = (time.time() - t_chunk_start) * 1000
-                speed_mb = (content_length / (1024 * 1024)) / ((time.time() - t_chunk_start) or 0.001)
-                print(
-                    f"[{ts}] [DEBUG] Chunk {chunk_index + 1}/{total_chunks} ({content_length / (1024 * 1024):.2f}MB) "
-                    f"for '{clean_name}' written to offset {offset} in {dur_ms:.1f}ms ({speed_mb:.1f} MB/s)",
-                    file=sys.stderr,
-                )
+            t_chunk_end = time.time()
+            dur_ms = (t_chunk_end - t_chunk_start) * 1000
+            disk_speed_mb = (content_length / (1024 * 1024)) / ((dur_ms / 1000) or 0.001)
 
-
+            prev_chunk_end = None
             with self.server.chunk_lock:
-                now = time.time()
+                now = t_chunk_end
                 # Purge stale uploads older than 1 hour
                 stale_ids = [uid for uid, st in self.server.active_chunk_uploads.items() if now - st.get("created_at", now) > 3600]
                 for uid in stale_ids:
@@ -910,14 +904,37 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                         "total_chunks": total_chunks,
                         "filename": clean_name,
                         "part_file": part_file,
-                        "created_at": now,
+                        "created_at": t_chunk_start,
+                        "last_chunk_end": t_chunk_end,
                         "is_gist": is_gist,
                     }
+                else:
+                    upload_state = self.server.active_chunk_uploads[upload_id]
+                    prev_chunk_end = upload_state.get("last_chunk_end")
+                    upload_state["last_chunk_end"] = t_chunk_end
 
                 upload_state = self.server.active_chunk_uploads[upload_id]
                 upload_state["chunks_received"].add(chunk_index)
                 received_count = len(upload_state["chunks_received"])
                 is_completed = (received_count == total_chunks)
+
+            if getattr(self.server, "debug", False):
+                ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                if prev_chunk_end is not None and (0.05 <= (t_chunk_end - prev_chunk_end) <= 30.0):
+                    elapsed_sec = t_chunk_end - prev_chunk_end
+                    effective_speed_mb = (content_length / (1024 * 1024)) / elapsed_sec
+                    if abs(effective_speed_mb - disk_speed_mb) >= 0.5:
+                        speed_str = f"{effective_speed_mb:.1f} MB/s effective, {disk_speed_mb:.1f} MB/s disk"
+                    else:
+                        speed_str = f"{effective_speed_mb:.1f} MB/s"
+                else:
+                    speed_str = f"{disk_speed_mb:.1f} MB/s"
+
+                print(
+                    f"[{ts}] [DEBUG] Chunk {chunk_index + 1}/{total_chunks} ({content_length / (1024 * 1024):.2f}MB) "
+                    f"for '{clean_name}' written to offset {offset} in {dur_ms:.1f}ms ({speed_str})",
+                    file=sys.stderr,
+                )
 
             if not is_completed:
                 self.send_json(200, {
@@ -931,7 +948,7 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
 
             # All chunks received! Finalize file
             with self.server.chunk_lock:
-                self.server.active_chunk_uploads.pop(upload_id, None)
+                upload_info = self.server.active_chunk_uploads.pop(upload_id, None)
 
             target_path = get_unique_path(self.server.upload_dir, clean_name)
             try:
@@ -951,6 +968,16 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                 "is_image": is_img,
             }]
             self.server.uploaded_files.append(target_path)
+
+            if getattr(self.server, "debug", False) and upload_info:
+                ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                total_sec = time.time() - upload_info.get("created_at", t_chunk_start)
+                avg_speed = (stat.st_size / (1024 * 1024)) / (total_sec or 0.001)
+                print(
+                    f"[{ts}] [DEBUG] Completed upload '{clean_name}' "
+                    f"({stat.st_size / (1024 * 1024):.2f}MB in {total_chunks} chunks, {total_sec:.1f}s, {avg_speed:.1f} MB/s avg)",
+                    file=sys.stderr,
+                )
 
             self.send_json(200, {
                 "status": "ok",
@@ -983,6 +1010,9 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
                         info["part_file"].unlink()
                     except Exception:
                         pass
+            if getattr(self.server, "debug", False) and info:
+                ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                print(f"[{ts}] [DEBUG] Upload '{info.get('filename')}' cancelled by client", file=sys.stderr)
             self.send_json(200, {"status": "ok", "cancelled": True})
             return
 
