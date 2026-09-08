@@ -428,7 +428,7 @@ class CliptoRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/info":
             auth_type = "totp" if self.server.totp_secret else ("pin" if self.server.auth_token else "none")
             self.send_json(200, {
-                "version": getattr(clipto, "__version__", "0.2.0"),
+                "version": getattr(clipto, "__version__", "0.3.0"),
                 "hostname": socket.gethostname(),
                 "dir": str(self.server.upload_dir),
                 "title": self.server.title,
